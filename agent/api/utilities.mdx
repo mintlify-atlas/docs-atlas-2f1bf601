@@ -464,6 +464,149 @@ async function main() {
 main();
 ```
 
+## Memory Tools
+
+The agent package includes built-in tools for persistent memory across conversations.
+
+### memoryLookup
+
+Search and retrieve memories from the memory store.
+
+```typescript
+import { memoryLookup } from '@deepagents/agent';
+```
+
+**Parameters:**
+- `query: string` - Search query to find relevant memories
+- `type?: 'episodic' | 'semantic' | 'procedural'` - Type of memory to search
+- `limit?: number` - Maximum memories to retrieve (default: 10, max: 50)
+- `minImportance?: number` - Minimum importance score 1-10 (default: 1)
+
+**Returns:** Array of matching memories with content, importance, and timestamps.
+
+### memoryWrite
+
+Store new memories in the memory store.
+
+```typescript
+import { memoryWrite } from '@deepagents/agent';
+```
+
+**Parameters:**
+- `content: string` - Memory content to store
+- `type: 'episodic' | 'semantic' | 'procedural'` - Memory type
+- `importance: number` - Importance score 1-10
+- `tags?: string[]` - Optional tags for categorization
+
+**Returns:** Confirmation with memory ID.
+
+### memoryForget
+
+Remove specific memories from the store.
+
+```typescript
+import { memoryForget } from '@deepagents/agent';
+```
+
+**Parameters:**
+- `memoryId?: string` - Specific memory ID to forget
+- `query?: string` - Query to find memories to forget
+- `olderThan?: number` - Forget memories older than N days
+
+**Returns:** Count of memories removed.
+
+### memoryCorrect
+
+Update or correct existing memories.
+
+```typescript
+import { memoryCorrect } from '@deepagents/agent';
+```
+
+**Parameters:**
+- `memoryId: string` - Memory ID to correct
+- `correction: string` - Corrected content
+- `reason?: string` - Reason for correction
+
+**Returns:** Confirmation of update.
+
+### memoryExplain
+
+Get explanation of how memories are stored and retrieved.
+
+```typescript
+import { memoryExplain } from '@deepagents/agent';
+```
+
+**Returns:** Explanation of the memory system.
+
+### memoryStats
+
+Get statistics about the memory store.
+
+```typescript
+import { memoryStats } from '@deepagents/agent';
+```
+
+**Returns:** Statistics including total memories, types breakdown, and storage info.
+
+### memoryTools
+
+Object containing all memory tools.
+
+```typescript
+import { memoryTools } from '@deepagents/agent';
+import { agent } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant with persistent memory.',
+  tools: memoryTools,
+});
+```
+
+### Example with Memory
+
+```typescript
+import { agent, execute, memoryTools } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: `You are a helpful assistant with memory.
+    - Use memoryLookup to recall past conversations
+    - Use memoryWrite to save important information
+    - Use memoryCorrect to fix inaccurate memories`,
+  tools: memoryTools,
+});
+
+// First conversation
+const stream1 = await execute(
+  assistant,
+  'My favorite color is blue and I live in Tokyo.',
+  {}
+);
+
+for await (const chunk of stream1.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Later conversation - agent can recall
+const stream2 = await execute(
+  assistant,
+  'What is my favorite color and where do I live?',
+  {}
+);
+
+for await (const chunk of stream2.textStream) {
+  process.stdout.write(chunk);
+}
+// Output: "Your favorite color is blue and you live in Tokyo."
+```
+
 ## See Also
 
 <CardGroup cols={2}>

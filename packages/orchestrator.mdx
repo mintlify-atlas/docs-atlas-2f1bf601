@@ -1,11 +1,19 @@
 ---
 title: '@deepagents/orchestrator'
-description: 'High-level orchestration patterns for complex multi-agent workflows'
+description: 'Orchestration patterns for complex multi-agent workflows (under development)'
 ---
+
+<Warning>
+This package is currently under active development and has no public API yet. The functionality described here represents planned features.
+</Warning>
 
 ## Overview
 
-The `@deepagents/orchestrator` package provides high-level patterns and utilities for orchestrating complex multi-agent workflows. It builds on top of `@deepagents/agent` to offer pre-configured agent architectures for common use cases.
+The `@deepagents/orchestrator` package will provide high-level patterns and utilities for orchestrating complex multi-agent workflows. It will build on top of `@deepagents/agent` to offer pre-configured agent architectures for common use cases.
+
+## Current Status
+
+The package is published on npm but currently contains only internal implementations with no public exports. The API is being actively developed.
 
 ## Installation
 
@@ -20,500 +28,184 @@ npm install @deepagents/orchestrator
 - `@deepagents/toolbox`
 - `@ai-sdk/openai`
 - `@ai-sdk/groq`
-- `zod`
-- `ai`
 
-## What is Orchestration?
+## Using Multi-Agent Patterns Today
 
-Orchestration manages:
-- Coordinating multiple specialized agents
-- Managing complex workflows
-- Routing requests to appropriate handlers
-- Aggregating results from multiple sources
-- Handling failures and retries
+While `@deepagents/orchestrator` is under development, you can build orchestration patterns using `@deepagents/agent` directly:
 
-<Note>
-The orchestrator package provides higher-level abstractions than direct agent composition, making it easier to build production-ready multi-agent systems.
-</Note>
+### Coordinator Pattern
 
-## Core Concepts
-
-### Orchestrator Pattern
-
-A central coordinator that:
-1. Receives user requests
-2. Analyzes requirements
-3. Delegates to specialist agents
-4. Aggregates responses
-5. Returns unified results
+Create a coordinator agent that delegates to specialists:
 
 ```typescript
-import { createOrchestrator } from '@deepagents/orchestrator';
+import { agent, instructions, swarm } from '@deepagents/agent';
 import { openai } from '@ai-sdk/openai';
 
-const orchestrator = createOrchestrator({
-  name: 'main',
+const researcher = agent({
+  name: 'researcher',
   model: openai('gpt-4o'),
-  specialists: [
-    researchAgent,
-    analysisAgent,
-    writingAgent,
-  ],
+  prompt: 'You research topics and provide detailed information.',
+  handoffDescription: 'Handles research and fact-finding tasks',
 });
 
-const result = await orchestrator.execute(
-  'Create a comprehensive market analysis report',
-  { userId: 'user123' }
-);
-```
-
-### Pipeline Pattern
-
-Sequential processing through stages:
-
-```typescript
-import { createPipeline } from '@deepagents/orchestrator';
-
-const pipeline = createPipeline([
-  { agent: dataCollector, name: 'collect' },
-  { agent: dataProcessor, name: 'process' },
-  { agent: dataAnalyzer, name: 'analyze' },
-  { agent: reportGenerator, name: 'report' },
-]);
-
-const result = await pipeline.run(initialInput, context);
-```
-
-### Router Pattern
-
-Dynamic routing based on request type:
-
-```typescript
-import { createRouter } from '@deepagents/orchestrator';
-
-const router = createRouter({
-  routes: [
-    {
-      pattern: /code|programming|debug/i,
-      agent: codeAgent,
-    },
-    {
-      pattern: /data|analysis|query/i,
-      agent: dataAgent,
-    },
-    {
-      pattern: /.*/, // Default
-      agent: generalAgent,
-    },
-  ],
-});
-
-const result = await router.route(userMessage, context);
-```
-
-## Built-in Orchestrators
-
-### Research Orchestrator
-
-Coordinates research, analysis, and synthesis:
-
-```typescript
-import { researchOrchestrator } from '@deepagents/orchestrator';
-
-const orchestrator = researchOrchestrator({
+const analyst = agent({
+  name: 'analyst',
   model: openai('gpt-4o'),
-  searchTool: tavilySearchTool,
+  prompt: 'You analyze data and provide insights.',
+  handoffDescription: 'Handles data analysis tasks',
 });
 
-const result = await orchestrator.execute(
-  'Research the latest developments in quantum computing',
-  {}
-);
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'You write clear, engaging content.',
+  handoffDescription: 'Handles writing and content creation',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions({
+    purpose: ['Coordinate research, analysis, and writing tasks'],
+    routine: [
+      'Analyze the request',
+      'Use transfer_to_researcher for fact-finding',
+      'Use transfer_to_analyst for data analysis',
+      'Use transfer_to_writer for content creation',
+    ],
+  }),
+  handoffs: [researcher, analyst, writer],
+});
+
+// Execute coordinated workflow
+const stream = swarm(coordinator, 'Create a market analysis report', {});
 ```
 
-**Workflow:**
-1. **Query Analysis** - Understand research requirements
-2. **Information Gathering** - Search and collect sources
-3. **Synthesis** - Analyze and combine findings
-4. **Report Generation** - Create structured output
+### Sequential Pipeline
 
-### Code Review Orchestrator
-
-Multi-stage code review process:
+Process tasks through multiple agents sequentially:
 
 ```typescript
-import { codeReviewOrchestrator } from '@deepagents/orchestrator';
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
 
-const orchestrator = codeReviewOrchestrator({
-  model: openai('gpt-4o'),
-  checks: ['style', 'security', 'performance', 'tests'],
-});
+async function pipeline(input: string, context: any) {
+  // Stage 1: Data collection
+  const collector = agent({
+    name: 'collector',
+    model: openai('gpt-4o'),
+    prompt: 'Extract key data points from the input.',
+  });
+  
+  const stage1 = await execute(collector, input, context);
+  const data = await stage1.text;
+  
+  // Stage 2: Analysis
+  const analyzer = agent({
+    name: 'analyzer',
+    model: openai('gpt-4o'),
+    prompt: 'Analyze the data and identify patterns.',
+  });
+  
+  const stage2 = await execute(analyzer, data, context);
+  const analysis = await stage2.text;
+  
+  // Stage 3: Report generation
+  const reporter = agent({
+    name: 'reporter',
+    model: openai('gpt-4o'),
+    prompt: 'Generate a comprehensive report.',
+  });
+  
+  const stage3 = await execute(reporter, analysis, context);
+  return await stage3.text;
+}
 
-const review = await orchestrator.review(codeContent, {
-  language: 'typescript',
-  guidelines: customGuidelines,
-});
+const result = await pipeline('Raw input data', {});
 ```
-
-**Stages:**
-1. **Style Check** - Code formatting and conventions
-2. **Security Analysis** - Vulnerability scanning
-3. **Performance Review** - Optimization opportunities
-4. **Test Coverage** - Test completeness assessment
-
-### Data Pipeline Orchestrator
-
-ETL and data transformation workflows:
-
-```typescript
-import { dataPipelineOrchestrator } from '@deepagents/orchestrator';
-
-const orchestrator = dataPipelineOrchestrator({
-  model: openai('gpt-4o'),
-  stages: [
-    { name: 'extract', agent: extractorAgent },
-    { name: 'transform', agent: transformerAgent },
-    { name: 'validate', agent: validatorAgent },
-    { name: 'load', agent: loaderAgent },
-  ],
-});
-
-const result = await orchestrator.process(rawData, context);
-```
-
-## Workflow Management
 
 ### Parallel Execution
 
-Run multiple agents concurrently:
+Run multiple agents concurrently and aggregate results:
 
 ```typescript
-import { parallelExecution } from '@deepagents/orchestrator';
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
 
-const results = await parallelExecution({
-  agents: [agent1, agent2, agent3],
-  input: userMessage,
-  context,
-  maxConcurrency: 3,
-});
-
-// results = [result1, result2, result3]
-```
-
-### Sequential Execution
-
-Run agents one after another:
-
-```typescript
-import { sequentialExecution } from '@deepagents/orchestrator';
-
-const results = await sequentialExecution({
-  agents: [step1, step2, step3],
-  input: initialData,
-  context,
-  continueOnError: false,
-});
-```
-
-### Conditional Branching
-
-Route based on conditions:
-
-```typescript
-import { conditionalBranch } from '@deepagents/orchestrator';
-
-const result = await conditionalBranch({
-  condition: (input) => input.priority === 'high',
-  trueBranch: urgentAgent,
-  falseBranch: standardAgent,
-  input: userRequest,
-  context,
-});
-```
-
-## Error Handling
-
-### Retry Mechanism
-
-```typescript
-import { withRetry } from '@deepagents/orchestrator';
-
-const resilientAgent = withRetry(baseAgent, {
-  maxRetries: 3,
-  backoff: 'exponential',
-  retryOn: ['timeout', 'rate_limit'],
-});
-
-const result = await resilientAgent.execute(input, context);
-```
-
-### Fallback Strategy
-
-```typescript
-import { withFallback } from '@deepagents/orchestrator';
-
-const robustAgent = withFallback(primaryAgent, {
-  fallbacks: [backupAgent1, backupAgent2],
-  timeout: 30000,
-});
-
-const result = await robustAgent.execute(input, context);
-```
-
-### Circuit Breaker
-
-```typescript
-import { circuitBreaker } from '@deepagents/orchestrator';
-
-const protectedAgent = circuitBreaker(agent, {
-  failureThreshold: 5,
-  timeout: 60000,
-  resetTimeout: 30000,
-});
-```
-
-## State Management
-
-### Workflow State
-
-Track workflow progress:
-
-```typescript
-import { WorkflowState } from '@deepagents/orchestrator';
-
-const state = new WorkflowState({
-  workflowId: 'wf-123',
-  initialData: {},
-});
-
-state.addStep('research', { status: 'pending' });
-state.updateStep('research', { status: 'completed', result: data });
-state.addStep('analysis', { status: 'in_progress' });
-
-const progress = state.getProgress();
-console.log(`${progress.completed}/${progress.total} steps complete`);
-```
-
-### Context Persistence
-
-Save and restore workflow context:
-
-```typescript
-import { persistContext, restoreContext } from '@deepagents/orchestrator';
-import { SqliteContextStore } from '@deepagents/context';
-
-const store = new SqliteContextStore('./workflows.db');
-
-// Save
-await persistContext(store, 'wf-123', workflowContext);
-
-// Restore
-const restored = await restoreContext(store, 'wf-123');
-```
-
-## Monitoring and Observability
-
-### Event Tracking
-
-```typescript
-import { OrchestrationEmitter } from '@deepagents/orchestrator';
-
-const emitter = new OrchestrationEmitter();
-
-emitter.on('workflow:start', ({ workflowId, name }) => {
-  console.log(`Started: ${name} (${workflowId})`);
-});
-
-emitter.on('agent:execute', ({ agentName, input }) => {
-  console.log(`Executing: ${agentName}`);
-});
-
-emitter.on('agent:complete', ({ agentName, duration }) => {
-  console.log(`Completed: ${agentName} in ${duration}ms`);
-});
-
-emitter.on('workflow:complete', ({ workflowId, result }) => {
-  console.log(`Workflow ${workflowId} complete`);
-});
-
-const orchestrator = createOrchestrator({
-  // ...
-  emitter,
-});
-```
-
-### Metrics Collection
-
-```typescript
-import { collectMetrics } from '@deepagents/orchestrator';
-
-const metrics = collectMetrics(orchestrator);
-
-setInterval(() => {
-  console.log('Metrics:', {
-    totalExecutions: metrics.totalExecutions,
-    avgDuration: metrics.avgDuration,
-    errorRate: metrics.errorRate,
-    activeWorkflows: metrics.activeWorkflows,
+async function parallelAnalysis(topic: string) {
+  const agents = [
+    agent({
+      name: 'technical',
+      model: openai('gpt-4o'),
+      prompt: 'Analyze technical aspects.',
+    }),
+    agent({
+      name: 'business',
+      model: openai('gpt-4o'),
+      prompt: 'Analyze business implications.',
+    }),
+    agent({
+      name: 'competitive',
+      model: openai('gpt-4o'),
+      prompt: 'Analyze competitive landscape.',
+    }),
+  ];
+  
+  // Run all analyses in parallel
+  const results = await Promise.all(
+    agents.map(agent => 
+      execute(agent, topic, {}).then(r => r.text)
+    )
+  );
+  
+  // Aggregate results
+  const synthesizer = agent({
+    name: 'synthesizer',
+    model: openai('gpt-4o'),
+    prompt: 'Synthesize multiple analyses into a cohesive report.',
   });
-}, 10000);
+  
+  const combined = results.join('\n\n---\n\n');
+  const final = await execute(synthesizer, combined, {});
+  
+  return await final.text;
+}
+
+const report = await parallelAnalysis('AI agent frameworks');
 ```
 
-## Advanced Patterns
+## Planned Features
 
-### Fan-Out/Fan-In
-
-Distribute work and aggregate results:
-
-```typescript
-import { fanOut, fanIn } from '@deepagents/orchestrator';
-
-// Fan out to multiple agents
-const results = await fanOut({
-  agents: [analyzer1, analyzer2, analyzer3],
-  input: data,
-  context,
-});
-
-// Fan in to aggregate
-const aggregated = await fanIn({
-  results,
-  aggregatorAgent: synthesisAgent,
-  context,
-});
-```
-
-### Map-Reduce
-
-Process collections in parallel:
-
-```typescript
-import { mapReduce } from '@deepagents/orchestrator';
-
-const result = await mapReduce({
-  items: documents,
-  mapAgent: processorAgent,
-  reduceAgent: summarizerAgent,
-  context,
-  maxConcurrency: 5,
-});
-```
-
-### Saga Pattern
-
-Distributed transactions with compensation:
-
-```typescript
-import { saga } from '@deepagents/orchestrator';
-
-const result = await saga({
-  steps: [
-    {
-      agent: reserveAgent,
-      compensate: releaseAgent,
-    },
-    {
-      agent: chargeAgent,
-      compensate: refundAgent,
-    },
-    {
-      agent: confirmAgent,
-      compensate: cancelAgent,
-    },
-  ],
-  input,
-  context,
-});
-```
-
-## Best Practices
+The `@deepagents/orchestrator` package will eventually provide:
 
 <CardGroup cols={2}>
-  <Card title="Single Responsibility" icon="bullseye">
-    Each agent should have one clear purpose
+  <Card title="Workflow patterns" icon="diagram-project">
+    Pre-built orchestration patterns for common use cases
   </Card>
-  <Card title="Idempotency" icon="arrows-rotate">
-    Make operations safe to retry
+  <Card title="State management" icon="database">
+    Persistent workflow state and checkpointing
   </Card>
-  <Card title="Timeout Management" icon="clock">
-    Set appropriate timeouts for each stage
+  <Card title="Error handling" icon="shield">
+    Retry mechanisms, fallbacks, and circuit breakers
   </Card>
-  <Card title="Error Boundaries" icon="shield">
-    Contain failures to prevent cascade
-  </Card>
-  <Card title="State Persistence" icon="database">
-    Save state for long-running workflows
-  </Card>
-  <Card title="Observability" icon="chart-line">
-    Track metrics and events
+  <Card title="Monitoring" icon="chart-line">
+    Built-in metrics and event tracking
   </Card>
 </CardGroup>
 
-## Example: Complete Workflow
+## Internal Implementations
 
-```typescript
-import {
-  createOrchestrator,
-  withRetry,
-  persistContext,
-  OrchestrationEmitter,
-} from '@deepagents/orchestrator';
-import { agent } from '@deepagents/agent';
-import { openai } from '@ai-sdk/openai';
-import { SqliteContextStore } from '@deepagents/context';
+The package currently contains internal implementations for:
+- DeepPlan - Planning and execution framework
+- DeepResearch - Research coordination agents
+- DeepWiki - Wiki generation workflows
+- ArXiv integration - Academic paper search and analysis
 
-// Create specialists
-const dataCollector = agent({
-  name: 'collector',
-  model: openai('gpt-4o'),
-  prompt: 'Collect data from sources.',
-  tools: { search: searchTool },
-});
+These are not yet exposed as public APIs.
 
-const analyzer = agent({
-  name: 'analyzer',
-  model: openai('gpt-4o'),
-  prompt: 'Analyze collected data.',
-});
+## Contributing
 
-const reporter = agent({
-  name: 'reporter',
-  model: openai('gpt-4o'),
-  prompt: 'Generate comprehensive report.',
-});
-
-// Setup monitoring
-const emitter = new OrchestrationEmitter();
-emitter.on('agent:complete', ({ agentName, duration }) => {
-  console.log(`✓ ${agentName} completed in ${duration}ms`);
-});
-
-// Create orchestrator
-const orchestrator = createOrchestrator({
-  name: 'research_pipeline',
-  model: openai('gpt-4o'),
-  specialists: [
-    withRetry(dataCollector, { maxRetries: 3 }),
-    withRetry(analyzer, { maxRetries: 2 }),
-    reporter,
-  ],
-  emitter,
-});
-
-// Execute workflow
-const workflowId = 'wf-' + Date.now();
-const store = new SqliteContextStore('./workflows.db');
-
-const result = await orchestrator.execute(
-  'Research AI agent frameworks and create comparison',
-  { workflowId }
-);
-
-// Persist final state
-await persistContext(store, workflowId, result.context);
-
-console.log('Workflow complete:', result);
-```
+If you're interested in contributing to the orchestrator package or have use cases you'd like to see supported, please open an issue on GitHub.
 
 ## Package Info
 
@@ -524,14 +216,14 @@ console.log('Workflow complete:', result);
 
 ## Related Packages
 
-<CardGroup cols={2}>
+<CardGroup cols={3}>
   <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
-    Core agent framework
+    Core agent framework with handoffs
   </Card>
   <Card title="@deepagents/context" icon="layer-group" href="/packages/context">
-    Context management
+    Context management and persistence
   </Card>
   <Card title="@deepagents/toolbox" icon="toolbox" href="/packages/toolbox">
-    Pre-built tools
+    Pre-built tools for agents
   </Card>
 </CardGroup>
