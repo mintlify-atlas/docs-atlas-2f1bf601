@@ -1,0 +1,441 @@
+---
+title: 'Semantic Similarity Search'
+description: 'Search ingested content using natural language'
+---
+
+# Semantic Similarity Search
+
+Perform semantic search over ingested documents using natural language queries. The similarity search function finds relevant content by comparing query embeddings with stored document embeddings.
+
+## Basic Search
+
+```typescript
+import { similaritySearch, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+const connector = local('docs/**/*.md');
+
+// Search for relevant content
+const results = await similaritySearch('How do I install the package?', {
+  connector,
+  store,
+  embedder,
+});
+
+console.log(results);
+```
+
+## How It Works
+
+The search process:
+
+1. **Auto-Ingest** - If needed, ingest content from the connector
+2. **Embed Query** - Convert query text to a vector embedding
+3. **Vector Search** - Find nearest neighbors using cosine similarity
+4. **Rank Results** - Sort by similarity score (1 - distance)
+5. **Return Results** - Top N most relevant chunks
+
+## Search Configuration
+
+```typescript
+const results = await similaritySearch(query, {
+  connector: Connector,  // Data source
+  store: Store,         // Vector store
+  embedder: Embedder,   // Embedding function
+});
+```
+
+### Query
+
+Natural language query string:
+
+```typescript
+const results = await similaritySearch(
+  'What are the main features?',
+  config
+);
+```
+
+### Connector
+
+The data source to search:
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+
+const results = await similaritySearch('installation', {
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+```
+
+### Store
+
+Vector store containing embeddings:
+
+```typescript
+import Database from 'better-sqlite3';
+import { SqliteStore } from '@deepagents/retrieval';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+```
+
+### Embedder
+
+Embedding function for query:
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+const embedder = fastembed({ model: 'BGESmallENV15' });
+```
+
+## Search Results
+
+Each result contains:
+
+```typescript
+{
+  content: string;       // Chunk text
+  document_id: string;   // Source document ID
+  distance: number;      // Cosine distance (0-1, lower is better)
+  similarity: number;    // Similarity score (1 - distance)
+  metadata: object | null; // Document metadata
+}
+```
+
+### Example Result
+
+```typescript
+const results = await similaritySearch('installation', config);
+
+console.log(results[0]);
+// {
+//   content: '## Installation\n\nInstall via npm:\n\nnpm install react',
+//   document_id: 'facebook/react/README.md',
+//   distance: 0.123,
+//   similarity: 0.877,
+//   metadata: { source: 'github' }
+// }
+```
+
+## Automatic Ingestion
+
+Search automatically handles ingestion based on the connector's `ingestWhen` strategy:
+
+### contentChanged (Default)
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged',
+});
+
+const results = await similaritySearch('query', {
+  connector,
+  store,
+  embedder,
+});
+// Always attempts ingestion, skips unchanged documents
+```
+
+### never
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'never',
+});
+
+const results = await similaritySearch('query', {
+  connector,
+  store,
+  embedder,
+});
+// Only ingests if source doesn't exist
+```
+
+### expired
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours
+});
+
+const results = await similaritySearch('query', {
+  connector,
+  store,
+  embedder,
+});
+// Only ingests if source expired or doesn't exist
+```
+
+## Top N Results
+
+By default, search returns the top 50 results. The store controls this:
+
+```typescript
+// In store.search() call
+const results = await config.store.search(
+  query,
+  { 
+    sourceId: config.connector.sourceId, 
+    topN: 50 // Default top N
+  },
+  config.embedder
+);
+```
+
+To customize, modify the store's search implementation or filter results:
+
+```typescript
+const allResults = await similaritySearch('query', config);
+const top10 = allResults.slice(0, 10);
+```
+
+## Filtering Results
+
+### By Similarity Threshold
+
+```typescript
+const results = await similaritySearch('query', config);
+
+const filtered = results.filter(r => r.similarity > 0.7);
+console.log(`Found ${filtered.length} results above 70% similarity`);
+```
+
+### By Metadata
+
+```typescript
+const results = await similaritySearch('query', config);
+
+const fromGithub = results.filter(
+  r => r.metadata?.source === 'github'
+);
+```
+
+### By Document
+
+```typescript
+const results = await similaritySearch('query', config);
+
+const fromReadme = results.filter(
+  r => r.document_id.includes('README')
+);
+```
+
+## Search Across Multiple Sources
+
+Search multiple sources independently:
+
+```typescript
+import { github, local, rss } from '@deepagents/retrieval/connectors';
+
+const sources = [
+  github.file('facebook/react/README.md'),
+  local('docs/**/*.md'),
+  rss('https://blog.example.com/feed'),
+];
+
+const allResults = [];
+
+for (const connector of sources) {
+  const results = await similaritySearch('installation', {
+    connector,
+    store,
+    embedder,
+  });
+  allResults.push(...results);
+}
+
+// Sort by similarity
+allResults.sort((a, b) => b.similarity - a.similarity);
+
+console.log(`Found ${allResults.length} total results`);
+```
+
+## Search by Document ID
+
+Search within a specific document using the store directly:
+
+```typescript
+const results = await store.search(
+  'installation',
+  {
+    sourceId: 'github:file:facebook/react/README.md',
+    documentId: 'facebook/react/README.md',
+    topN: 10,
+  },
+  embedder
+);
+```
+
+This restricts search to chunks from the specified document.
+
+## Cosine Similarity
+
+Search uses cosine similarity to measure relevance:
+
+- **Distance**: 0 (identical) to 1 (completely different)
+- **Similarity**: 1 - distance (0 to 1, higher is better)
+
+```typescript
+const result = {
+  distance: 0.2,
+  similarity: 0.8, // 1 - 0.2
+};
+```
+
+Typical ranges:
+- `similarity > 0.8` - Highly relevant
+- `similarity 0.6-0.8` - Moderately relevant
+- `similarity < 0.6` - Less relevant
+
+## Performance Optimization
+
+### Limit Results
+
+```typescript
+const results = await similaritySearch('query', config);
+const top5 = results.slice(0, 5);
+```
+
+### Use Smaller Models
+
+Faster embedding with smaller models:
+
+```typescript
+const embedder = fastembed({ model: 'BGESmallENV15' }); // 384 dims, fast
+```
+
+### Filter Before Processing
+
+```typescript
+const results = await similaritySearch('query', config);
+const relevant = results.filter(r => r.similarity > 0.7);
+// Process only relevant results
+```
+
+### Batch Multiple Queries
+
+Reuse embedder and store for multiple queries:
+
+```typescript
+const queries = ['query 1', 'query 2', 'query 3'];
+
+for (const query of queries) {
+  const results = await similaritySearch(query, {
+    connector,
+    store,
+    embedder, // Reused
+  });
+  console.log(`Results for "${query}":`, results.length);
+}
+```
+
+## Error Handling
+
+```typescript
+try {
+  const results = await similaritySearch('query', {
+    connector,
+    store,
+    embedder,
+  });
+  console.log(`Found ${results.length} results`);
+} catch (error) {
+  console.error('Search failed:', error);
+}
+```
+
+Common errors:
+- Source not found
+- Embedding failure
+- Database connection issues
+- Invalid query
+
+## Complete Example
+
+```typescript
+import Database from 'better-sqlite3';
+import { fastembed, SqliteStore, similaritySearch } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+// Setup
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed({ model: 'BGESmallENV15' });
+
+// Search
+const connector = github.file('facebook/react/README.md');
+const results = await similaritySearch(
+  'How do I get started with React?',
+  { connector, store, embedder }
+);
+
+// Process results
+for (const result of results.slice(0, 5)) {
+  console.log('---');
+  console.log(`Similarity: ${(result.similarity * 100).toFixed(1)}%`);
+  console.log(`Document: ${result.document_id}`);
+  console.log(`Content: ${result.content.slice(0, 200)}...`);
+}
+```
+
+## Best Practices
+
+**Use Natural Language Queries**
+
+Write queries as natural questions or statements:
+- "How do I install React?" (good)
+- "install react" (less effective)
+
+**Filter by Similarity**
+
+Set a minimum similarity threshold to exclude irrelevant results:
+
+```typescript
+const relevant = results.filter(r => r.similarity > 0.7);
+```
+
+**Check Document IDs**
+
+Use document IDs to understand where results come from:
+
+```typescript
+const grouped = results.reduce((acc, r) => {
+  acc[r.document_id] = acc[r.document_id] || [];
+  acc[r.document_id].push(r);
+  return acc;
+}, {});
+```
+
+**Reuse Configuration**
+
+Create config once and reuse:
+
+```typescript
+const config = { connector, store, embedder };
+
+const results1 = await similaritySearch('query 1', config);
+const results2 = await similaritySearch('query 2', config);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn about document ingestion
+  </Card>
+  <Card title="Embeddings" icon="brain" href="/retrieval/embeddings">
+    Explore embedding models
+  </Card>
+  <Card title="API Reference" icon="code" href="/retrieval/api/core">
+    View API documentation
+  </Card>
+</CardGroup>

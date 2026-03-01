@@ -1,0 +1,135 @@
+---
+title: Installation
+description: Install @deepagents/agent in your project
+---
+
+## Requirements
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node-js">
+    Node.js LTS (20+)
+  </Card>
+  <Card title="Zod" icon="shield-check">
+    Zod 3.25.76+ or 4.0.0+ (peer dependency)
+  </Card>
+</CardGroup>
+
+## Install Package
+
+<CodeGroup>
+
+```bash npm
+npm install @deepagents/agent zod
+```
+
+```bash pnpm
+pnpm add @deepagents/agent zod
+```
+
+```bash yarn
+yarn add @deepagents/agent zod
+```
+
+```bash bun
+bun add @deepagents/agent zod
+```
+
+</CodeGroup>
+
+## Install AI Provider
+
+Install the AI provider you want to use. The agent framework works with any [Vercel AI SDK](https://sdk.vercel.ai/docs) provider.
+
+<CodeGroup>
+
+```bash OpenAI
+npm install @ai-sdk/openai
+```
+
+```bash Anthropic
+npm install @ai-sdk/anthropic
+```
+
+```bash Google
+npm install @ai-sdk/google
+```
+
+```bash Groq
+npm install @ai-sdk/groq
+```
+
+</CodeGroup>
+
+## Environment Variables
+
+Set up your API keys as environment variables:
+
+```bash .env
+# OpenAI
+OPENAI_API_KEY=your_openai_api_key
+
+# Anthropic
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# Google
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_api_key
+
+# Groq
+GROQ_API_KEY=your_groq_api_key
+```
+
+## Verify Installation
+
+Create a simple test file to verify your installation:
+
+```typescript test.ts
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant.',
+});
+
+const stream = await execute(assistant, 'Say hello!', {});
+const text = await stream.text;
+
+console.log(text);
+```
+
+Run the test:
+
+```bash
+node --env-file=.env test.ts
+```
+
+If everything is set up correctly, you should see a greeting from the agent.
+
+## TypeScript Configuration
+
+Ensure your `tsconfig.json` includes these settings:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Create Your First Agent" icon="rocket" href="/agent/basic-agent">
+    Build a simple agent
+  </Card>
+  <Card title="Add Tools" icon="wrench" href="/agent/tools">
+    Integrate tools with your agent
+  </Card>
+</CardGroup>

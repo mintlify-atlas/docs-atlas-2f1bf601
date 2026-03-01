@@ -1,0 +1,189 @@
+---
+title: SQL Server Adapter
+description: Setup and configuration for Microsoft SQL Server
+---
+
+# SQL Server Adapter
+
+The SQL Server adapter provides T-SQL support for Microsoft SQL Server databases with enterprise features.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+npm install mssql
+```
+
+## Basic Usage
+
+```typescript
+import { SqlServer, tables, views, info, indexes } from '@deepagents/text2sql/sqlserver';
+import sql from 'mssql';
+
+const pool = new sql.ConnectionPool({
+  server: 'localhost',
+  database: 'mydb',
+  user: 'sa',
+  password: 'password'
+});
+await pool.connect();
+
+const adapter = new SqlServer({
+  execute: async (query) => {
+    const result = await pool.request().query(query);
+    return result.recordset;
+  },
+  grounding: [tables(), views(), info(), indexes()],
+  schemas: ['dbo', 'staging']  // Optional
+});
+```
+
+## Configuration
+
+```typescript
+interface SqlServerAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+  schemas?: string[];  // Default: excludes 'INFORMATION_SCHEMA', 'sys'
+}
+```
+
+## SQL Server Features
+
+### Default Schema
+- **Default schema**: `dbo`
+- **System schemas**: `INFORMATION_SCHEMA`, `sys`
+
+### Identifier Quoting
+SQL Server uses square brackets:
+
+```typescript
+adapter.quoteIdentifier('my_table');  // [my_table]
+adapter.quoteIdentifier('my column'); // [my column]
+```
+
+### TOP Instead of LIMIT
+
+```sql
+-- SQL Server syntax
+SELECT TOP 10 * FROM customers
+
+-- Not: SELECT * FROM customers LIMIT 10
+```
+
+### Validation
+
+Uses `SET PARSEONLY ON` for validation:
+
+```typescript
+const adapter = new SqlServer({
+  execute: async (sql) => {
+    const result = await pool.request().query(sql);
+    return result.recordset;
+  },
+  validate: async (sql) => {
+    // Custom validation
+    await pool.request().query(`SET PARSEONLY ON; ${sql}; SET PARSEONLY OFF;`);
+  },
+  grounding: [tables()]
+});
+```
+
+## Error Handling
+
+| Error Code | Type | Suggestion |
+|------------|------|------------|
+| 208 | MISSING_TABLE | Include schema prefix (e.g., dbo.TableName) |
+| 207 | INVALID_COLUMN | Verify column exists |
+| 156 | SYNTAX_ERROR | Review keywords and GROUP BY clauses |
+| 4104 | INVALID_COLUMN | Qualify columns with table aliases |
+
+## Complete Example
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { SqlServer, tables, constraints } from '@deepagents/text2sql/sqlserver';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import sql from 'mssql';
+
+const pool = new sql.ConnectionPool({
+  server: 'localhost',
+  database: 'ecommerce',
+  user: 'sa',
+  password: 'YourStrong@Password',
+  options: {
+    encrypt: true,
+    trustServerCertificate: true
+  }
+});
+
+await pool.connect();
+
+const adapter = new SqlServer({
+  execute: async (query) => {
+    const result = await pool.request().query(query);
+    return result.recordset;
+  },
+  grounding: [tables(), constraints()],
+  schemas: ['dbo']
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter,
+  store: new InMemoryContextStore()
+});
+
+const sql = await text2sql.toSql('Show top 10 customers by revenue');
+console.log(sql);
+// SELECT TOP 10 * FROM [dbo].[customers] ORDER BY [total_revenue] DESC
+```
+
+## Best Practices
+
+### 1. Use Schemas
+
+```sql
+CREATE SCHEMA staging;
+CREATE SCHEMA analytics;
+
+CREATE TABLE staging.import_data (...);
+CREATE TABLE analytics.daily_metrics (...);
+```
+
+### 2. Enable Connection Pooling
+
+```typescript
+const pool = new sql.ConnectionPool({
+  // ...
+  pool: {
+    max: 20,
+    min: 0,
+    idleTimeoutMillis: 30000
+  }
+});
+```
+
+### 3. Use Indexes
+
+```sql
+CREATE NONCLUSTERED INDEX IX_Customers_Email 
+  ON dbo.Customers(Email);
+
+CREATE CLUSTERED INDEX IX_Orders_CreatedAt 
+  ON dbo.Orders(CreatedAt);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MySQL Adapter" icon="leaf" href="/text2sql/adapters/mysql">
+    Setup for MySQL and MariaDB
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API
+  </Card>
+</CardGroup>

@@ -1,0 +1,546 @@
+---
+title: Explainability
+description: SQL to English explanations and query transparency
+---
+
+# Explainability
+
+Text2SQL provides transparency into how queries are generated, validated, and executed. The system can explain SQL queries in plain English and provide reasoning for its decisions.
+
+## SQL Validation
+
+Before executing any query, Text2SQL validates it using the database's `EXPLAIN` command:
+
+```typescript
+const sql = await text2sql.toSql('Show me all customers');
+// Query is automatically validated before returning
+
+// Manual validation
+const validationError = await adapter.validate(sql);
+if (validationError) {
+  console.error('Validation error:', validationError);
+}
+```
+
+### Validation Process
+
+1. **Syntax Check** - Ensures query is syntactically valid
+2. **Schema Check** - Verifies tables and columns exist
+3. **Type Check** - Validates data type compatibility
+4. **Performance Check** - Uses EXPLAIN to estimate query cost
+
+## Error Explanations
+
+When queries fail, Text2SQL provides helpful error messages with recovery suggestions:
+
+```typescript
+try {
+  const sql = await text2sql.toSql('Show me data from invalid_table');
+} catch (error) {
+  console.error(error);
+}
+```
+
+Error format:
+
+```json
+{
+  "error": "no such table: invalid_table",
+  "error_type": "MISSING_TABLE",
+  "suggestion": "Check the database schema for the correct table name. The table you referenced does not exist.",
+  "sql_attempted": "SELECT * FROM invalid_table"
+}
+```
+
+### Error Types
+
+#### MISSING_TABLE
+
+```
+Error: no such table: invalid_table
+Suggestion: Check the database schema for the correct table name.
+```
+
+**Recovery**: System re-checks schema and suggests similar table names.
+
+#### INVALID_COLUMN
+
+```
+Error: no such column: invalid_column
+Suggestion: Check the table schema for correct column names. The column may not exist or is ambiguous.
+```
+
+**Recovery**: System lists available columns from the table.
+
+#### SYNTAX_ERROR
+
+```
+Error: near "SELCT": syntax error
+Suggestion: There is a SQL syntax error. Review the query structure, keywords, and punctuation.
+```
+
+**Recovery**: System regenerates query with corrected syntax.
+
+#### INVALID_FUNCTION
+
+```
+Error: function INVALID_FUNC() does not exist
+Suggestion: The function or operator you used is not recognized. Confirm its name and argument types.
+```
+
+**Recovery**: System suggests valid alternative functions.
+
+## Automatic Error Recovery
+
+The conversational interface automatically retries failed queries with corrections:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me revenue from sales table' }
+]);
+
+// Behind the scenes:
+// Attempt 1: SELECT * FROM sales → Error: MISSING_TABLE
+// Attempt 2: Check schema, finds 'orders' table with revenue column
+// Attempt 3: SELECT revenue FROM orders → Success
+```
+
+### Retry Strategy
+
+1. **Classify Error** - Determine error type (syntax, missing table, invalid column)
+2. **Gather Context** - Re-check schema, review query structure
+3. **Apply Fix** - Targeted correction based on error type
+4. **Validate** - Re-validate before executing
+5. **Execute** - Retry with corrected query
+
+Maximum 3 retries. After that, explains the issue to the user.
+
+## Query Explanations
+
+The conversational interface provides plain English summaries of query results:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me top 10 customers by revenue' }
+]);
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text') {
+    console.log(chunk.content);
+    // "Here are the top 10 customers by total revenue:
+    //  1. Acme Corp - $125,000
+    //  2. Global Industries - $98,500
+    //  ..."
+  }
+}
+```
+
+### Explanation Features
+
+- **Result Summary** - High-level overview of what the query returned
+- **Key Comparisons** - Highlights interesting patterns in the data
+- **Follow-Up Suggestions** - Recommends related queries
+
+## Reasoning Framework
+
+Text2SQL uses a meta-cognitive reasoning framework to make decisions transparent:
+
+### 1. Logical Dependencies
+
+Before generating SQL:
+
+```
+Applying Principle 1 (Logical dependencies):
+- Need: schema to know which table has sales data
+- Need: clarify "last month" = calendar month or rolling 30 days?
+
+Action: Ask user for date range clarification BEFORE generating SQL.
+```
+
+### 2. Risk Assessment
+
+```
+Applying Principle 2 (Risk assessment):
+- Consequence: Unbounded query may return millions of rows
+- Risk: High - could impact database performance
+
+Action: Add LIMIT clause or ask user to specify date range.
+```
+
+### 3. Abductive Reasoning
+
+When queries fail:
+
+```
+Applying Principle 3 (Abductive reasoning):
+- Hypothesis 1 (most likely): Filter too restrictive
+- Hypothesis 2: Data doesn't exist for that period
+- Hypothesis 3: JOIN eliminated matching rows
+
+Testing hypotheses:
+1. Remove filters one by one to isolate the issue
+2. Check date range actually has data
+3. Run subqueries separately to verify each table
+```
+
+### 4. Precision and Grounding
+
+```
+Applying Principle 6 (Precision and Grounding):
+- User asked for "active customers"
+- Schema shows status column with values: 'active', 'inactive', 'pending'
+- Sample data confirms lowercase values
+
+Action: Use status = 'active' (lowercase, exact match).
+```
+
+## SQL to English
+
+Convert existing SQL to natural language explanations:
+
+```typescript
+import { toExplanation } from '@deepagents/text2sql';
+
+const sql = `
+  SELECT 
+    customers.name,
+    COUNT(orders.id) AS order_count,
+    SUM(orders.amount) AS total_revenue
+  FROM customers
+  LEFT JOIN orders ON customers.id = orders.customer_id
+  WHERE orders.created_at >= '2024-01-01'
+  GROUP BY customers.id
+  HAVING total_revenue > 1000
+  ORDER BY total_revenue DESC
+  LIMIT 10
+`;
+
+const explanation = await toExplanation(sql, { adapter });
+console.log(explanation);
+```
+
+Output:
+
+```
+This query shows the top 10 customers by revenue in 2024:
+
+1. Retrieves customer names from the customers table
+2. Counts orders for each customer
+3. Sums the total revenue per customer
+4. Filters to orders created on or after January 1, 2024
+5. Groups results by customer
+6. Includes only customers with revenue exceeding $1,000
+7. Sorts by revenue (highest first)
+8. Limits to top 10 results
+```
+
+## Query Formatting
+
+Text2SQL automatically formats SQL according to the database dialect:
+
+```typescript
+const formatted = adapter.format(`SELECT * FROM customers WHERE status='active'`);
+console.log(formatted);
+```
+
+Output:
+
+```sql
+SELECT
+  *
+FROM
+  customers
+WHERE
+  status = 'active'
+```
+
+### Formatting Features
+
+- **Indentation** - Consistent 2-space indentation
+- **Keyword Casing** - SQL keywords in UPPERCASE
+- **Line Breaks** - Logical breaks between clauses
+- **Alignment** - Aligned column lists and conditions
+
+## Debugging Queries
+
+### Inspect Schema Context
+
+See what schema information the AI has:
+
+```typescript
+const schemaFragments = await text2sql.index();
+console.log(JSON.stringify(schemaFragments, null, 2));
+```
+
+### Inspect Conversation Context
+
+See the full conversation history:
+
+```typescript
+import { ContextEngine } from '@deepagents/context';
+
+const context = new ContextEngine({
+  store: store,
+  chatId: 'chat-123',
+  userId: 'user-456'
+});
+
+const history = await context.getHistory();
+console.log(history);
+```
+
+### Enable Verbose Logging
+
+```typescript
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter: adapter,
+  store: store,
+  debug: true  // Enable debug logging
+});
+```
+
+## Token Usage Tracking
+
+Monitor AI token consumption:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me all customers' }
+]);
+
+for await (const chunk of stream) {
+  if (chunk.type === 'finish') {
+    console.log('Token usage:', chunk.usage);
+    // { promptTokens: 1250, completionTokens: 150, totalTokens: 1400 }
+  }
+}
+```
+
+### Usage Metadata
+
+```typescript
+interface TokenUsage {
+  promptTokens: number;      // Input tokens
+  completionTokens: number;  // Output tokens
+  totalTokens: number;       // Total tokens
+}
+```
+
+## Performance Metrics
+
+Track query execution time:
+
+```typescript
+const start = Date.now();
+const sql = await text2sql.toSql('Complex aggregation query...');
+const generationTime = Date.now() - start;
+
+const execStart = Date.now();
+const results = await adapter.execute(sql);
+const executionTime = Date.now() - execStart;
+
+console.log(`Generation: ${generationTime}ms, Execution: ${executionTime}ms`);
+```
+
+## Confidence Scores
+
+The system can indicate confidence in its query generation:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me sales from ambiguous timeframe' }
+]);
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text' && chunk.metadata?.confidence) {
+    console.log('Confidence:', chunk.metadata.confidence);
+    // 'high' | 'medium' | 'low'
+  }
+}
+```
+
+### Confidence Indicators
+
+- **High** - Clear schema match, unambiguous query
+- **Medium** - Some ambiguity resolved via reasoning
+- **Low** - Multiple assumptions made, clarification recommended
+
+## Query Plan Visualization
+
+Visualize the query execution plan:
+
+```typescript
+const sql = 'SELECT * FROM customers WHERE status = "active"';
+const plan = await adapter.execute(`EXPLAIN QUERY PLAN ${sql}`);
+console.log(plan);
+```
+
+Example output (SQLite):
+
+```
+SELECT PLAN
+|--SCAN customers
+|--USE INDEX idx_status (status=?)
+```
+
+## Best Practices
+
+### 1. Review Generated Queries
+
+Always review SQL before executing in production:
+
+```typescript
+const sql = await text2sql.toSql('Show me all customer data');
+console.log('Generated SQL:', sql);
+
+// Review, then execute
+const results = await adapter.execute(sql);
+```
+
+### 2. Validate Assumptions
+
+Check the AI's assumptions:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me active users' }
+]);
+
+// If AI assumes status = 'active', verify that's correct:
+console.log('Assumption: status = "active" means active users');
+```
+
+### 3. Use Teachables for Clarity
+
+```typescript
+import { explain } from '@deepagents/context';
+
+const text2sql = new Text2Sql({
+  // ...
+  teachingsOptions: {
+    fragments: [
+      explain({
+        concept: 'active users',
+        explanation: 'Users with login_at within last 30 days',
+        therefore: 'Use login_at > NOW() - INTERVAL 30 DAY'
+      })
+    ]
+  }
+});
+```
+
+### 4. Monitor Error Patterns
+
+Track common errors to improve teachables:
+
+```typescript
+let errorLog = [];
+
+try {
+  const sql = await text2sql.toSql(query);
+} catch (error) {
+  errorLog.push({ query, error, timestamp: new Date() });
+  // Analyze patterns to add teachables
+}
+```
+
+### 5. Provide Feedback Loops
+
+Allow users to correct the AI:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me revenue last month' },
+  { role: 'assistant', content: 'Generated SQL...' },
+  { role: 'user', content: 'That\'s wrong, use gross_revenue not net_revenue' }
+]);
+
+// AI learns from correction and adjusts future queries
+```
+
+## Complete Example
+
+```typescript explainability-demo.ts
+import { Text2Sql } from '@deepagents/text2sql';
+import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
+import { InMemoryContextStore, explain } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import Database from 'better-sqlite3';
+
+const db = new Database(':memory:');
+db.exec(`
+  CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    status TEXT,
+    total_revenue REAL
+  );
+`);
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter: new Sqlite({
+    execute: (sql) => {
+      console.log('Executing SQL:', sql);
+      return db.prepare(sql).all();
+    },
+    validate: async (sql) => {
+      try {
+        db.prepare(`EXPLAIN ${sql}`).all();
+        console.log('✓ SQL validated successfully');
+      } catch (error) {
+        console.error('✗ Validation failed:', error.message);
+        throw error;
+      }
+    },
+    grounding: [tables()]
+  }),
+  store: new InMemoryContextStore(),
+  teachingsOptions: {
+    fragments: [
+      explain({
+        concept: 'active customers',
+        explanation: 'Customers with status = "active"',
+        therefore: 'Filter using WHERE status = "active"'
+      })
+    ]
+  }
+});
+
+async function demo() {
+  console.log('=== Query Generation with Explainability ===\n');
+  
+  // Generate query
+  const sql = await text2sql.toSql('Show me active customers');
+  
+  console.log('Generated SQL:', sql);
+  console.log('Formatted:', text2sql.adapter.format(sql));
+  
+  // Validate
+  const validationError = await text2sql.adapter.validate(sql);
+  if (validationError) {
+    console.error('Validation error:', validationError);
+    return;
+  }
+  
+  // Execute
+  const results = await text2sql.adapter.execute(sql);
+  console.log('Results:', results);
+}
+
+demo().catch(console.error);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Learn about adapter-specific features
+  </Card>
+  <Card title="Core API" icon="code" href="/text2sql/api/core">
+    Full Text2SQL API reference
+  </Card>
+</CardGroup>

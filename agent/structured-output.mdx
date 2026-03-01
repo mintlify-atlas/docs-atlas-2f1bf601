@@ -1,0 +1,431 @@
+---
+title: Structured Output
+description: Get type-safe structured responses from agents using Zod schemas
+---
+
+Agents can return structured, type-safe output by defining a Zod schema. This ensures responses conform to a specific format, making them easy to parse and use in your application.
+
+## Basic Structured Output
+
+Define an `output` schema using Zod:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, generate } from '@deepagents/agent';
+import { z } from 'zod';
+
+const sentimentSchema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  confidence: z.number().min(0).max(1),
+  keywords: z.array(z.string()),
+});
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze the sentiment of the given text.',
+  output: sentimentSchema,
+});
+
+const result = await generate(analyzer, 'I love this product!', {});
+
+console.log(result.output);
+// {
+//   sentiment: 'positive',
+//   confidence: 0.95,
+//   keywords: ['love', 'product']
+// }
+```
+
+## Type Safety
+
+The output is fully typed based on your Zod schema:
+
+```typescript
+type SentimentResult = z.infer<typeof sentimentSchema>;
+
+const result = await generate(analyzer, 'This is amazing!', {});
+const output: SentimentResult = result.output;
+
+// TypeScript knows these properties exist
+console.log(output.sentiment); // 'positive' | 'negative' | 'neutral'
+console.log(output.confidence); // number
+console.log(output.keywords); // string[]
+```
+
+## Complex Schemas
+
+### Nested Objects
+
+```typescript
+import { z } from 'zod';
+
+const userProfileSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().email(),
+  }),
+  preferences: z.object({
+    theme: z.enum(['light', 'dark', 'auto']),
+    notifications: z.boolean(),
+    language: z.string(),
+  }),
+  metadata: z.object({
+    createdAt: z.string().datetime(),
+    lastLogin: z.string().datetime(),
+    loginCount: z.number().int(),
+  }),
+});
+
+const profileAgent = agent({
+  name: 'profile_extractor',
+  model: openai('gpt-4o'),
+  prompt: 'Extract user profile information from the conversation.',
+  output: userProfileSchema,
+});
+```
+
+### Arrays and Lists
+
+```typescript
+const searchResultsSchema = z.object({
+  query: z.string(),
+  results: z.array(
+    z.object({
+      title: z.string(),
+      url: z.string().url(),
+      snippet: z.string(),
+      relevance: z.number().min(0).max(1),
+    })
+  ),
+  totalResults: z.number().int(),
+  searchTime: z.number(),
+});
+
+const searchAgent = agent({
+  name: 'search_analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze search results and provide structured output.',
+  output: searchResultsSchema,
+});
+```
+
+### Optional Fields
+
+```typescript
+const taskSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  priority: z.enum(['low', 'medium', 'high']),
+  dueDate: z.string().datetime().optional(),
+  assignee: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+```
+
+## Real-World Examples
+
+### Research Planning
+
+From the source code examples:
+
+```typescript research_bot.ts:8:23
+const WebSearchPlanSchema = z.object({
+  searches: z.array(
+    z.object({
+      reason: z
+        .string()
+        .describe('Your reasoning for why this search is important to the query.'),
+      query: z
+        .string()
+        .describe('The search term to use for the web search.'),
+    })
+  ).describe('A list of web searches to perform to best answer the query.'),
+});
+
+const planner = agent({
+  model: openai('gpt-4o'),
+  name: 'PlannerAgent',
+  output: WebSearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'Given a query, come up with a set of web searches to perform.',
+    ],
+    routine: ['Output between 5 and 10 terms to query for.'],
+  }),
+});
+
+const result = await generate(planner, 'Query: AI agents in production', {});
+const plan = result.output;
+
+// Type-safe access
+plan.searches.forEach(search => {
+  console.log(`Query: ${search.query}`);
+  console.log(`Reason: ${search.reason}`);
+});
+```
+
+### Report Generation
+
+```typescript research_bot.ts:25:33
+const ReportDataSchema = z.object({
+  short_summary: z
+    .string()
+    .describe('A short 2-3 sentence summary of the findings.'),
+  markdown_report: z.string().describe('The final report'),
+  follow_up_questions: z
+    .array(z.string())
+    .describe('Suggested topics to research further'),
+});
+
+const writer = agent({
+  name: 'WriterAgent',
+  model: openai('gpt-4o'),
+  output: ReportDataSchema,
+  prompt: instructions({
+    purpose: ['Write a cohesive report for a research query.'],
+    routine: [
+      'Come up with an outline',
+      'Generate the report in markdown',
+      'Aim for 5-10 pages, at least 1000 words',
+    ],
+  }),
+});
+```
+
+### Financial Analysis
+
+```typescript finanicals_bot.ts:10:46
+const FinancialSearchPlanSchema = z.object({
+  searches: z
+    .array(
+      z.object({
+        reason: z.string().describe('Why this search is relevant'),
+        query: z.string().describe('The search term'),
+      })
+    )
+    .describe('A list of searches to perform'),
+});
+
+const AnalysisSummarySchema = z.object({
+  summary: z.string().describe('Short text summary for this aspect'),
+});
+
+const FinancialReportDataSchema = z.object({
+  short_summary: z.string().describe('A short 2-3 sentence executive summary'),
+  markdown_report: z.string().describe('The full markdown report'),
+  follow_up_questions: z
+    .array(z.string())
+    .describe('Suggested follow-up questions'),
+});
+
+const VerificationResultSchema = z.object({
+  verified: z
+    .boolean()
+    .describe('Whether the report seems coherent and plausible'),
+  issues: z
+    .string()
+    .describe('If not verified, describe the main issues'),
+});
+```
+
+## Extracting Output
+
+Use the `toOutput()` helper to extract structured output:
+
+```typescript
+import { agent, generate, toOutput } from '@deepagents/agent';
+import { z } from 'zod';
+
+const dataSchema = z.object({
+  value: z.number(),
+  unit: z.string(),
+});
+
+const extractor = agent({
+  name: 'extractor',
+  model: openai('gpt-4o'),
+  prompt: 'Extract numerical data from text.',
+  output: dataSchema,
+});
+
+// With generate()
+const result = await generate(extractor, 'The temperature is 72 degrees', {});
+const output = result.output;
+
+// With toOutput() helper
+const output2 = await toOutput(generate(extractor, 'Speed: 60 mph', {}));
+console.log(output2); // { value: 60, unit: 'mph' }
+```
+
+## Streaming with Structured Output
+
+Structured output works with streaming:
+
+```typescript
+import { agent, execute, toOutput } from '@deepagents/agent';
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze the input.',
+  output: sentimentSchema,
+});
+
+const stream = await execute(analyzer, 'This is great!', {});
+
+// Stream partial output
+for await (const partial of stream.partialOutputStream) {
+  console.log('Partial:', partial);
+}
+
+// Get final output
+const final = await toOutput(stream);
+console.log('Final:', final);
+```
+
+## Validation and Descriptions
+
+Add descriptions to schema fields to guide the model:
+
+```typescript
+const taskSchema = z.object({
+  title: z
+    .string()
+    .min(5)
+    .max(100)
+    .describe('A clear, concise task title'),
+  
+  description: z
+    .string()
+    .describe('Detailed description of what needs to be done'),
+  
+  priority: z
+    .enum(['low', 'medium', 'high', 'urgent'])
+    .describe('Task priority level based on importance and deadline'),
+  
+  estimatedHours: z
+    .number()
+    .positive()
+    .describe('Estimated hours to complete the task'),
+  
+  tags: z
+    .array(z.string())
+    .describe('Relevant tags for categorization (e.g., "bug", "feature", "docs")'),
+});
+```
+
+## Combining with Context
+
+Structured output works with context variables:
+
+```typescript
+interface AnalysisContext {
+  userId: string;
+  sessionId: string;
+}
+
+const analysisSchema = z.object({
+  userId: z.string(),
+  insights: z.array(z.string()),
+  recommendations: z.array(z.string()),
+});
+
+const analyst = agent<z.infer<typeof analysisSchema>, AnalysisContext>({
+  name: 'analyst',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `Analyze data for user ${ctx?.userId}`,
+  output: analysisSchema,
+});
+
+const context: AnalysisContext = {
+  userId: 'user123',
+  sessionId: 'session456',
+};
+
+const result = await generate(analyst, 'Analyze user behavior', context);
+console.log(result.output.userId); // 'user123'
+console.log(result.output.insights);
+```
+
+## Error Handling
+
+Handle schema validation errors:
+
+```typescript
+import { z } from 'zod';
+
+try {
+  const result = await generate(analyzer, 'Some text', {});
+  const output = result.output;
+  
+  // Validate manually if needed
+  const validated = sentimentSchema.parse(output);
+  console.log(validated);
+} catch (error) {
+  if (error instanceof z.ZodError) {
+    console.error('Schema validation failed:', error.errors);
+  } else {
+    console.error('Generation failed:', error);
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Add Descriptions">
+    Always add descriptions to your schema fields to guide the model:
+    
+    ```typescript
+    z.string().describe('User email address in lowercase')
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Enums for Categories">
+    Use enums instead of free-form strings for categories:
+    
+    ```typescript
+    // ✅ Good
+    z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
+    
+    // ❌ Less reliable
+    z.string()
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate Ranges">
+    Add validation for numeric ranges:
+    
+    ```typescript
+    z.number().min(0).max(100).describe('Percentage value between 0-100')
+    ```
+  </Accordion>
+  
+  <Accordion title="Clear Field Names">
+    Use descriptive field names that clearly indicate the expected content:
+    
+    ```typescript
+    // ✅ Good
+    emailAddress: z.string().email()
+    
+    // ❌ Ambiguous
+    email: z.string()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Context Variables" icon="share-nodes" href="/agent/context-variables">
+    Share state between agents
+  </Card>
+  <Card title="Streaming" icon="water" href="/agent/streaming">
+    Stream agent responses
+  </Card>
+  <Card title="API Reference" icon="book" href="/agent/api/agent">
+    Full API documentation
+  </Card>
+</CardGroup>

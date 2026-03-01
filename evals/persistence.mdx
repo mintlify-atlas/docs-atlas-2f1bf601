@@ -1,0 +1,379 @@
+---
+title: Persistence
+description: SQLite-backed run storage for evaluation history
+---
+
+# Persistence
+
+The `RunStore` class provides SQLite-backed persistence for evaluation runs, cases, and scores.
+
+## Creating a Store
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+// Default location: .evals/store.db
+const store = new RunStore();
+
+// Custom location
+const store = new RunStore('./my-evals/results.db');
+
+// In-memory (for testing)
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync(':memory:');
+const store = new RunStore(db);
+```
+
+The directory is created automatically if it doesn't exist.
+
+## Database Schema
+
+The store manages four main tables:
+
+### Suites
+
+A suite groups related runs together (e.g., all runs for a specific evaluation):
+
+```typescript
+interface SuiteRow {
+  id: string;
+  name: string;
+  created_at: number;
+}
+```
+
+### Runs
+
+A run represents a single evaluation execution:
+
+```typescript
+interface RunRow {
+  id: string;
+  suite_id: string;
+  name: string;
+  model: string;
+  config: Record<string, unknown> | null;
+  started_at: number;
+  finished_at: number | null;
+  status: 'running' | 'completed' | 'failed';
+  summary: RunSummary | null;
+}
+```
+
+### Cases
+
+A case is a single test item in a run:
+
+```typescript
+interface CaseRow {
+  id: string;
+  run_id: string;
+  idx: number;
+  input: unknown;
+  output: string | null;
+  expected: unknown | null;
+  latency_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+  error: string | null;
+}
+```
+
+### Scores
+
+A score is the result of running a scorer on a case:
+
+```typescript
+interface ScoreRow {
+  id: string;
+  case_id: string;
+  scorer_name: string;
+  score: number;
+  reason: string | null;
+}
+```
+
+## Suites
+
+### Create a Suite
+
+```typescript
+const suite = store.createSuite('text2sql-accuracy');
+// { id: '...', name: 'text2sql-accuracy', created_at: 1234567890 }
+```
+
+### Find Suite by Name
+
+```typescript
+const suite = store.findSuiteByName('text2sql-accuracy');
+if (suite) {
+  console.log(suite.id);
+}
+```
+
+### Get Suite by ID
+
+```typescript
+const suite = store.getSuite(suiteId);
+```
+
+### List All Suites
+
+```typescript
+const suites = store.listSuites();
+for (const suite of suites) {
+  console.log(suite.name);
+}
+```
+
+### Rename a Suite
+
+```typescript
+store.renameSuite(suiteId, 'new-name');
+```
+
+## Runs
+
+### Create a Run
+
+```typescript
+const runId = store.createRun({
+  suite_id: suite.id,
+  name: 'my-eval',
+  model: 'gpt-4o',
+  config: { temperature: 0.7 },
+});
+```
+
+### Finish a Run
+
+Mark a run as completed or failed:
+
+```typescript
+store.finishRun(runId, 'completed', summary);
+```
+
+### Get a Run
+
+```typescript
+const run = store.getRun(runId);
+if (run) {
+  console.log(run.status);
+}
+```
+
+### List Runs
+
+List all runs or filter by suite:
+
+```typescript
+// All runs
+const runs = store.listRuns();
+
+// Runs in a specific suite
+const runs = store.listRuns(suiteId);
+```
+
+### Get Latest Completed Run
+
+Get the most recent completed run for a suite:
+
+```typescript
+const run = store.getLatestCompletedRun(suiteId);
+
+// Filter by model
+const run = store.getLatestCompletedRun(suiteId, 'gpt-4o');
+```
+
+### Rename a Run
+
+```typescript
+store.renameRun(runId, 'new-name');
+```
+
+## Cases
+
+### Save Cases
+
+Save one or more cases:
+
+```typescript
+store.saveCases([
+  {
+    id: caseId,
+    run_id: runId,
+    idx: 0,
+    input: { question: 'What is 2+2?' },
+    output: '4',
+    expected: '4',
+    latency_ms: 150,
+    tokens_in: 10,
+    tokens_out: 2,
+  },
+]);
+```
+
+### Get Cases
+
+Get all cases for a run:
+
+```typescript
+const cases = store.getCases(runId);
+for (const c of cases) {
+  console.log(c.idx, c.output);
+}
+```
+
+### Get Failing Cases
+
+Get cases that scored below a threshold:
+
+```typescript
+const failing = store.getFailingCases(runId, 0.5);
+for (const c of failing) {
+  console.log(`Case #${c.idx} failed with scores:`, c.scores);
+}
+```
+
+**Returns:** `CaseWithScores[]`
+
+```typescript
+interface CaseWithScores extends CaseRow {
+  scores: Array<{ scorer_name: string; score: number; reason: string | null }>;
+}
+```
+
+## Scores
+
+### Save Scores
+
+```typescript
+store.saveScores([
+  {
+    id: scoreId,
+    case_id: caseId,
+    scorer_name: 'exact',
+    score: 1.0,
+    reason: undefined,
+  },
+]);
+```
+
+## Summaries
+
+### Get Run Summary
+
+Compute aggregated statistics for a run:
+
+```typescript
+const summary = store.getRunSummary(runId, 0.5);
+// {
+//   totalCases: 100,
+//   passCount: 85,
+//   failCount: 15,
+//   meanScores: { exact: 0.92, factual: 0.88 },
+//   totalLatencyMs: 12340,
+//   totalTokensIn: 1024,
+//   totalTokensOut: 512,
+// }
+```
+
+**Parameters:**
+
+- `runId` — Run ID
+- `threshold` — Minimum score to count as "pass" (default: 0.5)
+
+**Returns:** `RunSummary`
+
+```typescript
+interface RunSummary {
+  totalCases: number;
+  passCount: number;
+  failCount: number;
+  meanScores: Record<string, number>;
+  totalLatencyMs: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+}
+```
+
+## Prompts (Experimental)
+
+The store also supports versioned prompts:
+
+### Create a Prompt
+
+```typescript
+const prompt = store.createPrompt('my-prompt', 'You are a helpful assistant.');
+// { id: '...', name: 'my-prompt', version: 1, content: '...', created_at: ... }
+
+// Creating again increments version
+const prompt2 = store.createPrompt('my-prompt', 'Updated prompt.');
+// { id: '...', name: 'my-prompt', version: 2, content: '...', created_at: ... }
+```
+
+### List Prompts
+
+```typescript
+const prompts = store.listPrompts();
+for (const p of prompts) {
+  console.log(`${p.name} v${p.version}`);
+}
+```
+
+### Get Prompt by ID
+
+```typescript
+const prompt = store.getPrompt(promptId);
+```
+
+### Delete a Prompt
+
+```typescript
+store.deletePrompt(promptId);
+```
+
+## Transactions
+
+The store uses transactions internally for batch operations. You don't need to manage transactions manually.
+
+## Migrations
+
+The store automatically migrates older database schemas to the latest version:
+
+- **Prompts versioning** — Adds `version` column to `prompts` table
+- **Suite foreign keys** — Adds `ON DELETE CASCADE` to `runs.suite_id`
+
+Migrations run automatically on store initialization.
+
+## Example: Querying Historical Data
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+const suite = store.findSuiteByName('text2sql-accuracy');
+if (!suite) throw new Error('Suite not found');
+
+const runs = store.listRuns(suite.id);
+console.log(`Found ${runs.length} runs`);
+
+for (const run of runs) {
+  if (run.status === 'completed') {
+    const summary = store.getRunSummary(run.id);
+    console.log(`${run.model}: ${summary.passCount}/${summary.totalCases} passed`);
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Comparison" icon="chart-line" href="/evals/comparison">
+    Compare runs and detect regressions
+  </Card>
+  <Card title="API Reference" icon="code" href="/evals/api/store">
+    Full RunStore API documentation
+  </Card>
+</CardGroup>

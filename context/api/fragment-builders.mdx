@@ -1,0 +1,762 @@
+---
+title: 'Fragment Builders API'
+description: 'Complete API reference for all fragment builder functions'
+---
+
+## Overview
+
+Fragment builders are functions that create `ContextFragment` objects. They provide a type-safe, ergonomic way to construct context data.
+
+## Base Types
+
+### ContextFragment
+
+```typescript
+interface ContextFragment<T extends FragmentData = FragmentData> {
+  id?: string;              // Optional unique identifier
+  name: string;             // Fragment identifier/type
+  data: T;                  // Fragment content
+  type?: FragmentType;      // 'fragment' | 'message'
+  persist?: boolean;        // Whether to persist to storage
+  codec?: FragmentCodec;    // Custom encoding/decoding
+  metadata?: Record<string, unknown>;  // Internal tracking data
+}
+```
+
+### FragmentData
+
+```typescript
+type FragmentData =
+  | string
+  | number
+  | null
+  | undefined
+  | boolean
+  | ContextFragment
+  | FragmentData[]
+  | { [key: string]: FragmentData };
+```
+
+### FragmentType
+
+```typescript
+type FragmentType = 'fragment' | 'message';
+```
+
+## Core Utilities
+
+### fragment()
+
+Create a wrapper fragment with nested children.
+
+```typescript
+function fragment(
+  name: string,
+  ...children: FragmentData[]
+): ContextFragment
+```
+
+**Example:**
+```typescript
+import { fragment, term, hint } from '@deepagents/context';
+
+const instructions = fragment(
+  'instructions',
+  term('API', 'Application Programming Interface'),
+  hint('Always validate input'),
+);
+
+// Results in:
+// {
+//   name: 'instructions',
+//   data: [
+//     { name: 'term', data: { name: 'API', definition: '...' } },
+//     { name: 'hint', data: 'Always validate input' }
+//   ]
+// }
+```
+
+### role()
+
+Create a role/system instructions fragment.
+
+```typescript
+function role(content: string): ContextFragment
+```
+
+**Example:**
+```typescript
+import { role } from '@deepagents/context';
+
+const systemRole = role('You are a helpful SQL assistant');
+
+// Results in:
+// { name: 'role', data: 'You are a helpful SQL assistant' }
+```
+
+## Domain Fragments
+
+### term()
+
+Define business vocabulary.
+
+```typescript
+function term(name: string, definition: string): ContextFragment
+```
+
+**Parameters:**
+- `name` - The term or acronym
+- `definition` - What the term means
+
+**Example:**
+```typescript
+term('NPL', 'non-performing loan - loan past due 90+ days');
+```
+
+**Returns:**
+```typescript
+{
+  name: 'term',
+  data: {
+    name: 'NPL',
+    definition: 'non-performing loan - loan past due 90+ days'
+  }
+}
+```
+
+### hint()
+
+Define behavioral rules and constraints.
+
+```typescript
+function hint(text: string): ContextFragment
+```
+
+**Parameters:**
+- `text` - The rule or constraint (imperative language)
+
+**Example:**
+```typescript
+hint('Always exclude orders with status = "test"');
+```
+
+**Returns:**
+```typescript
+{
+  name: 'hint',
+  data: 'Always exclude orders with status = "test"'
+}
+```
+
+### guardrail()
+
+Define safety rules and boundaries.
+
+```typescript
+function guardrail(input: {
+  rule: string;
+  reason?: string;
+  action?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `rule` - The guardrail or restriction to enforce
+- `reason` - (Optional) Why this guardrail exists
+- `action` - (Optional) What to do when triggered
+
+**Example:**
+```typescript
+guardrail({
+  rule: 'Never expose PII',
+  reason: 'GDPR compliance',
+  action: 'Aggregate or anonymize instead',
+});
+```
+
+**Returns:**
+```typescript
+{
+  name: 'guardrail',
+  data: {
+    rule: 'Never expose PII',
+    reason: 'GDPR compliance',
+    action: 'Aggregate or anonymize instead'
+  }
+}
+```
+
+### explain()
+
+Define rich concept explanations.
+
+```typescript
+function explain(input: {
+  concept: string;
+  explanation: string;
+  therefore?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `concept` - The concept being explained
+- `explanation` - Metaphor or detailed explanation
+- `therefore` - (Optional) Actionable instruction
+
+**Example:**
+```typescript
+explain({
+  concept: 'churn rate',
+  explanation: 'like a leaky bucket - measures customer loss rate',
+  therefore: 'Calculate as (lost_customers / total_customers) * 100',
+});
+```
+
+### example()
+
+Define question-answer pairs for few-shot learning.
+
+```typescript
+function example(input: {
+  question: string;
+  answer: string;
+  note?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `question` - Natural language question
+- `answer` - The correct answer or query
+- `note` - (Optional) Additional context
+
+**Example:**
+```typescript
+example({
+  question: 'show me total revenue',
+  answer: 'SELECT SUM(amount) FROM orders',
+  note: 'Exclude test accounts',
+});
+```
+
+### clarification()
+
+Define when to ask for more information.
+
+```typescript
+function clarification(input: {
+  when: string;
+  ask: string;
+  reason: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `when` - Trigger condition
+- `ask` - Question to ask the user
+- `reason` - Why clarification is needed
+
+**Example:**
+```typescript
+clarification({
+  when: 'user asks for "revenue"',
+  ask: 'Do you mean gross or net revenue?',
+  reason: 'Revenue can be calculated multiple ways',
+});
+```
+
+### workflow()
+
+Define multi-step processes.
+
+```typescript
+function workflow(input: {
+  task: string;
+  steps: string[];
+  triggers?: string[];
+  notes?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `task` - Name of the workflow
+- `steps` - Sequential steps to execute
+- `triggers` - (Optional) Phrases that activate this workflow
+- `notes` - (Optional) Additional guidance
+
+**Example:**
+```typescript
+workflow({
+  task: 'Customer Analysis',
+  triggers: ['analyze customers', 'customer analysis'],
+  steps: [
+    'Segment customers by value',
+    'Calculate metrics per segment',
+    'Identify trends',
+  ],
+  notes: 'Use 90-day rolling window',
+});
+```
+
+### quirk()
+
+Document data edge cases and workarounds.
+
+```typescript
+function quirk(input: {
+  issue: string;
+  workaround: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `issue` - Description of the quirk or edge case
+- `workaround` - How to handle it
+
+**Example:**
+```typescript
+quirk({
+  issue: 'IDs contain leading zeros but stored as integers',
+  workaround: 'Use LPAD(id::VARCHAR, 10, \'0\') to restore zeros',
+});
+```
+
+### styleGuide()
+
+Define style preferences and standards.
+
+```typescript
+function styleGuide(input: {
+  prefer: string;
+  never?: string;
+  always?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `prefer` - Preferred approach
+- `never` - (Optional) Anti-patterns to avoid
+- `always` - (Optional) Rules that must always apply
+
+**Example:**
+```typescript
+styleGuide({
+  prefer: 'Use CTEs for complex queries',
+  never: 'Nested subqueries deeper than 2 levels',
+  always: 'Include comments for business logic',
+});
+```
+
+### analogy()
+
+Define concept comparisons.
+
+```typescript
+function analogy(input: {
+  concepts: string[];
+  relationship: string;
+  insight?: string;
+  therefore?: string;
+  pitfall?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `concepts` - Array of related concepts
+- `relationship` - Comparison using real-world analogy
+- `insight` - (Optional) Key insight revealed
+- `therefore` - (Optional) Actionable instruction
+- `pitfall` - (Optional) Common mistake to avoid
+
+**Example:**
+```typescript
+analogy({
+  concepts: ['logo churn', 'revenue churn'],
+  relationship: 'Logo churn counts customers, revenue churn measures dollars',
+  insight: 'Losing 10 small customers ≠ losing 1 enterprise customer',
+  therefore: 'Always report both metrics',
+  pitfall: 'Don\'t use logo churn to predict revenue impact',
+});
+```
+
+### glossary()
+
+Map terms to expressions.
+
+```typescript
+function glossary(entries: Record<string, string>): ContextFragment
+```
+
+**Parameters:**
+- `entries` - Record mapping terms to SQL expressions
+
+**Example:**
+```typescript
+glossary({
+  'revenue': 'SUM(orders.total_amount)',
+  'active user': 'last_login > NOW() - INTERVAL \'30 days\'',
+  'churned': 'status = \'churned\'',
+});
+```
+
+**Returns:**
+```typescript
+{
+  name: 'glossary',
+  data: [
+    { term: 'revenue', expression: 'SUM(orders.total_amount)' },
+    { term: 'active user', expression: '...' },
+    { term: 'churned', expression: '...' }
+  ]
+}
+```
+
+### principle()
+
+Define guiding principles.
+
+```typescript
+function principle(input: {
+  title: string;
+  description: string;
+  policies?: FragmentData[];
+}): ContextFragment
+```
+
+**Parameters:**
+- `title` - Principle name
+- `description` - What this principle means
+- `policies` - (Optional) Specific rules implementing the principle
+
+**Example:**
+```typescript
+principle({
+  title: 'Data Quality',
+  description: 'Always validate data before analysis',
+  policies: [
+    'Check for nulls and outliers',
+    'Verify data types match expectations',
+    'Document data quality issues',
+  ],
+});
+```
+
+### policy()
+
+Define prerequisite rules.
+
+```typescript
+function policy(input: {
+  rule: string;
+  before?: string;
+  reason?: string;
+  policies?: FragmentData[];
+}): ContextFragment
+```
+
+**Parameters:**
+- `rule` - The policy rule
+- `before` - (Optional) What action this is a prerequisite for
+- `reason` - (Optional) Why this rule matters
+- `policies` - (Optional) Nested sub-policies
+
+**Example:**
+```typescript
+policy({
+  rule: 'Validate SQL syntax',
+  before: 'executing any query',
+  reason: 'Catches errors early',
+});
+```
+
+## User Fragments
+
+### identity()
+
+Define user identity.
+
+```typescript
+function identity(input: {
+  name?: string;
+  role?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `name` - (Optional) User's name
+- `role` - (Optional) User's role or position
+
+**Example:**
+```typescript
+identity({ name: 'John', role: 'VP of Sales' });
+```
+
+### persona()
+
+Define AI assistant persona.
+
+```typescript
+function persona(input: {
+  name: string;
+  role?: string;
+  objective?: string;
+  tone?: string;
+}): ContextFragment
+```
+
+**Parameters:**
+- `name` - Persona's name
+- `role` - (Optional) Persona's expertise/identity
+- `objective` - (Optional) What the persona should accomplish
+- `tone` - (Optional) Communication style
+
+**Example:**
+```typescript
+persona({
+  name: 'DataBot',
+  role: 'SQL Expert',
+  objective: 'Generate accurate SQL queries',
+  tone: 'professional and concise',
+});
+```
+
+### alias()
+
+Define user-specific vocabulary.
+
+```typescript
+function alias(term: string, meaning: string): ContextFragment
+```
+
+**Parameters:**
+- `term` - User's term
+- `meaning` - What the user means by it
+
+**Example:**
+```typescript
+alias('revenue', 'gross revenue before deductions');
+alias('the big table', 'the orders table');
+```
+
+### preference()
+
+Define output preferences.
+
+```typescript
+function preference(aspect: string, value: string): ContextFragment
+```
+
+**Parameters:**
+- `aspect` - What aspect this preference applies to
+- `value` - The user's preference
+
+**Example:**
+```typescript
+preference('date format', 'YYYY-MM-DD');
+preference('output style', 'tables over charts');
+```
+
+### userContext()
+
+Define current working focus.
+
+```typescript
+function userContext(description: string): ContextFragment
+```
+
+**Parameters:**
+- `description` - What the user is working on
+
+**Example:**
+```typescript
+userContext('Preparing Q4 board presentation');
+```
+
+### correction()
+
+Record corrections to understanding.
+
+```typescript
+function correction(
+  subject: string,
+  clarification: string
+): ContextFragment
+```
+
+**Parameters:**
+- `subject` - What was misunderstood
+- `clarification` - The correct understanding
+
+**Example:**
+```typescript
+correction(
+  'status column',
+  '1 = active, 0 = inactive, not boolean'
+);
+```
+
+## Message Fragments
+
+### user()
+
+Create user message.
+
+```typescript
+function user(
+  content: string | (UIMessage & { role: 'user' }),
+  ...reminders: UserReminder[]
+): MessageFragment
+```
+
+**Parameters:**
+- `content` - Message text or UIMessage object
+- `reminders` - (Optional) System reminders
+
+**Example:**
+```typescript
+user('What is our revenue?');
+
+user(
+  'Deploy to production',
+  reminder('Ask for confirmation')
+);
+```
+
+### assistant()
+
+Create assistant message.
+
+```typescript
+function assistant(message: UIMessage): MessageFragment
+```
+
+**Parameters:**
+- `message` - UIMessage object with role 'assistant'
+
+**Example:**
+```typescript
+assistant({
+  id: 'resp-1',
+  role: 'assistant',
+  parts: [{ type: 'text', text: 'Total revenue is $1.2M' }],
+});
+```
+
+### assistantText()
+
+Convenience for text-only assistant messages.
+
+```typescript
+function assistantText(
+  content: string,
+  options?: { id?: string }
+): MessageFragment
+```
+
+**Parameters:**
+- `content` - Message text
+- `options` - (Optional) Message options
+
+**Example:**
+```typescript
+assistantText('Query executed successfully');
+assistantText('Done', { id: 'resp-42' });
+```
+
+### reminder()
+
+Create reminder payload.
+
+```typescript
+function reminder(
+  text: string | ((content: string) => string),
+  options?: { asPart?: boolean }
+): UserReminder
+```
+
+**Parameters:**
+- `text` - Reminder text or function
+- `options` - (Optional) Reminder options
+  - `asPart` - If true, add as separate part instead of inline
+
+**Example:**
+```typescript
+reminder('Validate input before processing');
+
+reminder('Ask for confirmation', { asPart: true });
+
+reminder((content) => {
+  if (content.includes('delete')) {
+    return 'This is destructive - ask first';
+  }
+  return 'Standard operation';
+});
+```
+
+## Type Guards
+
+### isFragment()
+
+Check if value is a ContextFragment.
+
+```typescript
+function isFragment(data: unknown): data is ContextFragment
+```
+
+**Example:**
+```typescript
+const data: unknown = { name: 'term', data: { ... } };
+
+if (isFragment(data)) {
+  console.log(data.name); // Type-safe access
+}
+```
+
+### isFragmentObject()
+
+Check if value is a plain object.
+
+```typescript
+function isFragmentObject(data: unknown): data is FragmentObject
+```
+
+**Example:**
+```typescript
+if (isFragmentObject(data)) {
+  // data is Record<string, FragmentData>
+}
+```
+
+### isMessageFragment()
+
+Check if fragment is a message.
+
+```typescript
+function isMessageFragment(
+  fragment: ContextFragment
+): fragment is MessageFragment
+```
+
+**Example:**
+```typescript
+if (isMessageFragment(fragment)) {
+  const message = fragment.codec.decode();
+  console.log(message.role); // 'user' | 'assistant'
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Renderers API" icon="code" href="/context/api/renderers">
+    Complete renderer API reference
+  </Card>
+  <Card title="StreamStore API" icon="database" href="/context/api/stream-store">
+    Complete stream storage API reference
+  </Card>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Learn about domain fragments
+  </Card>
+  <Card title="User Context" icon="user" href="/context/user-context">
+    Learn about user fragments
+  </Card>
+</CardGroup>

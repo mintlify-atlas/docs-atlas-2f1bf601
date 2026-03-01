@@ -1,0 +1,478 @@
+---
+title: 'PDF Connector'
+description: 'Ingest and extract text from PDF documents'
+---
+
+# PDF Connector
+
+The PDF connector extracts text from PDF documents, supporting both local files and remote URLs with glob pattern matching.
+
+## Import
+
+```typescript
+import { pdf, pdfFile } from '@deepagents/retrieval/connectors';
+```
+
+## Two Variants
+
+The package provides two PDF connectors:
+
+- `pdf(pattern)` - Glob pattern matching for multiple PDFs
+- `pdfFile(source)` - Single PDF from file path or URL
+
+## PDF Pattern Matching
+
+Ingest multiple PDFs using glob patterns:
+
+```typescript
+import { pdf } from '@deepagents/retrieval/connectors';
+
+const connector = pdf('**/*.pdf');
+```
+
+### Basic Usage
+
+```typescript
+import { pdf } from '@deepagents/retrieval/connectors';
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Ingest all PDFs in a directory
+await ingest({
+  connector: pdf('docs/**/*.pdf'),
+  store,
+  embedder,
+});
+```
+
+### Pattern Examples
+
+```typescript
+// All PDFs recursively
+pdf('**/*.pdf')
+
+// PDFs in specific directory
+pdf('research/**/*.pdf')
+
+// PDFs in current directory only
+pdf('*.pdf')
+
+// Multiple directories
+pdf('{docs,papers}/**/*.pdf')
+```
+
+### Source ID
+
+```typescript
+const connector = pdf('**/*.pdf');
+console.log(connector.sourceId);
+// "pdf:**/*.pdf"
+```
+
+### Excluded Directories
+
+These directories are automatically excluded:
+
+- `**/node_modules/**`
+- `**/.git/**`
+
+## Single PDF File
+
+Ingest a single PDF from a file path or URL:
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const connector = pdfFile('./manual.pdf');
+```
+
+### Local File
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+// Relative path
+const connector = pdfFile('./docs/manual.pdf');
+
+// Absolute path
+const connector = pdfFile('/Users/you/documents/paper.pdf');
+
+await ingest({ connector, store, embedder });
+```
+
+### Remote URL
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const connector = pdfFile('https://example.com/whitepaper.pdf');
+
+await ingest({ connector, store, embedder });
+```
+
+### Source ID
+
+```typescript
+// Local file
+const connector1 = pdfFile('./manual.pdf');
+console.log(connector1.sourceId);
+// "pdf:file:./manual.pdf"
+
+// Remote URL
+const connector2 = pdfFile('https://example.com/paper.pdf');
+console.log(connector2.sourceId);
+// "pdf:url:https://example.com/paper.pdf"
+```
+
+## Text Extraction
+
+Both connectors use the `unpdf` library for text extraction:
+
+```typescript
+import { extractText, getDocumentProxy } from 'unpdf';
+
+const buffer = await readFile(path);
+const pdf = await getDocumentProxy(new Uint8Array(buffer));
+const { text } = await extractText(pdf, { mergePages: true });
+```
+
+### Merged Pages
+
+Pages are automatically merged into a single text document:
+
+```typescript
+{ mergePages: true }
+```
+
+This creates cohesive content for better embedding quality.
+
+## Document Format
+
+Extracted text is ingested as-is:
+
+```
+[Page 1 text]
+[Page 2 text]
+[Page 3 text]
+...
+```
+
+All pages are combined into a single document.
+
+## Examples
+
+### Research Papers
+
+```typescript
+import { pdf } from '@deepagents/retrieval/connectors';
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = pdf('research/**/*.pdf');
+
+// Ingest all papers
+await ingest({ connector, store, embedder });
+
+// Search
+const results = await similaritySearch(
+  'What methodology was used for the experiment?',
+  { connector, store, embedder }
+);
+
+console.log(results[0].content);
+```
+
+### User Manual
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const connector = pdfFile('./docs/user-manual.pdf');
+
+await ingest({ connector, store, embedder });
+
+const results = await similaritySearch(
+  'How do I configure authentication?',
+  { connector, store, embedder }
+);
+```
+
+### Remote PDF
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const connector = pdfFile(
+  'https://arxiv.org/pdf/2103.00020.pdf'
+);
+
+await ingest({ connector, store, embedder });
+
+const results = await similaritySearch(
+  'What are the main contributions?',
+  { connector, store, embedder }
+);
+```
+
+### Multiple PDFs
+
+```typescript
+const pdfs = [
+  pdfFile('./docs/manual.pdf'),
+  pdfFile('./docs/guide.pdf'),
+  pdfFile('https://example.com/whitepaper.pdf'),
+];
+
+for (const connector of pdfs) {
+  await ingest({ connector, store, embedder });
+  console.log(`Ingested: ${connector.sourceId}`);
+}
+```
+
+## Performance
+
+### File Validation
+
+Only `.pdf` files are processed:
+
+```typescript
+if (!path.toLowerCase().endsWith('.pdf')) continue;
+```
+
+Non-PDF files are skipped.
+
+### Memory Usage
+
+PDFs are loaded into memory for processing:
+
+```typescript
+const buffer = await readFile(path);
+const pdf = await getDocumentProxy(new Uint8Array(buffer));
+```
+
+Large PDFs may consume significant memory.
+
+### Network Requests
+
+Remote PDFs are downloaded completely:
+
+```typescript
+const response = await fetch(url);
+const buffer = new Uint8Array(await response.arrayBuffer());
+```
+
+## Error Handling
+
+### Invalid PDFs
+
+```typescript
+try {
+  await ingest({
+    connector: pdfFile('./corrupted.pdf'),
+    store,
+    embedder,
+  });
+} catch (error) {
+  console.error('PDF processing failed:', error);
+}
+```
+
+### HTTP Errors
+
+```typescript
+const response = await fetch(url);
+if (!response.ok) {
+  throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+}
+```
+
+### File Not Found
+
+```typescript
+try {
+  const buffer = await readFile(path);
+} catch (error) {
+  console.error('File not found:', error);
+}
+```
+
+## Document IDs
+
+### Pattern Matching
+
+Document IDs are file paths:
+
+```typescript
+const connector = pdf('docs/**/*.pdf');
+
+for await (const doc of connector.sources()) {
+  console.log(doc.id);
+  // "/Users/you/project/docs/manual.pdf"
+  // "/Users/you/project/docs/guide.pdf"
+}
+```
+
+### Single File
+
+Document ID is the source:
+
+```typescript
+const connector = pdfFile('./manual.pdf');
+
+for await (const doc of connector.sources()) {
+  console.log(doc.id);
+  // "./manual.pdf"
+}
+```
+
+### Remote URL
+
+Document ID is the URL:
+
+```typescript
+const connector = pdfFile('https://example.com/paper.pdf');
+
+for await (const doc of connector.sources()) {
+  console.log(doc.id);
+  // "https://example.com/paper.pdf"
+}
+```
+
+## Extraction Quality
+
+Text extraction quality depends on the PDF:
+
+**Good Quality**
+- Text-based PDFs (searchable)
+- Well-structured documents
+- Standard fonts
+
+**Poor Quality**
+- Scanned images (requires OCR, not supported)
+- Complex layouts
+- Heavy graphics
+
+### No OCR Support
+
+The connector does not perform OCR on scanned PDFs. Only text-based PDFs are supported.
+
+## Chunking
+
+PDF text is chunked using the default text splitter:
+
+```typescript
+import { MarkdownTextSplitter } from 'langchain/text_splitter';
+
+const splitter = new MarkdownTextSplitter();
+const chunks = await splitter.splitText(pdfText);
+```
+
+For custom chunking:
+
+```typescript
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+
+const customSplitter = async (id: string, content: string) => {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+  });
+  return await splitter.splitText(content);
+};
+
+await ingest({
+  connector: pdf('**/*.pdf'),
+  store,
+  embedder,
+  splitter: customSplitter,
+});
+```
+
+## Best Practices
+
+**Validate PDFs**
+
+Ensure PDFs are text-based, not scanned images.
+
+**Use Specific Patterns**
+
+Be specific to avoid processing unnecessary files:
+
+```typescript
+pdf('research/papers/**/*.pdf') // Good
+pdf('**/*.pdf')                 // May include unwanted files
+```
+
+**Handle Large PDFs**
+
+Large PDFs may need custom chunking:
+
+```typescript
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+
+const splitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 2000,
+  chunkOverlap: 400,
+});
+```
+
+**Cache Remote PDFs**
+
+Download and cache remote PDFs locally for faster re-ingestion.
+
+**Check HTTP Status**
+
+Validate remote URLs before ingestion:
+
+```typescript
+const response = await fetch(url, { method: 'HEAD' });
+if (!response.ok) {
+  console.error(`URL not accessible: ${url}`);
+}
+```
+
+## Limitations
+
+**No OCR**
+
+Scanned PDFs require OCR, which is not supported.
+
+**Memory Usage**
+
+Large PDFs are loaded entirely into memory.
+
+**Layout Preservation**
+
+Complex layouts may not extract well. Text order may be incorrect.
+
+**Images and Graphics**
+
+Images are ignored. Only text is extracted.
+
+## Comparison
+
+| Feature | `pdf(pattern)` | `pdfFile(source)` |
+|---------|----------------|-------------------|
+| Multiple files | Yes | No |
+| Glob patterns | Yes | No |
+| Local files | Yes | Yes |
+| Remote URLs | No | Yes |
+| Excluded dirs | Yes | No |
+| Use case | Batch processing | Single document |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Files" icon="folder" href="/retrieval/connectors/files">
+    Work with local files
+  </Card>
+  <Card title="Linear Connector" icon="linear" href="/retrieval/connectors/linear">
+    Ingest Linear issues
+  </Card>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn about ingestion
+  </Card>
+</CardGroup>

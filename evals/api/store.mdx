@@ -1,0 +1,464 @@
+---
+title: RunStore API
+description: API reference for SQLite run persistence
+---
+
+# RunStore API
+
+The `RunStore` class provides SQLite-backed persistence for evaluation runs, cases, and scores.
+
+## Import
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+```
+
+## Constructor
+
+### `new RunStore(pathOrDb?)`
+
+Create a new run store.
+
+```typescript
+// Default location: .evals/store.db
+const store = new RunStore();
+
+// Custom location
+const store = new RunStore('./my-evals/results.db');
+
+// In-memory (for testing)
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync(':memory:');
+const store = new RunStore(db);
+```
+
+**Parameters:**
+
+- `pathOrDb?: string | DatabaseSync` — File path or SQLite database instance
+
+The directory is created automatically if it doesn't exist.
+
+## Suites
+
+### `createSuite(name)`
+
+Create a new suite.
+
+```typescript
+const suite = store.createSuite('text2sql-accuracy');
+// { id: '...', name: 'text2sql-accuracy', created_at: 1234567890 }
+```
+
+**Returns:** `SuiteRow`
+
+```typescript
+interface SuiteRow {
+  id: string;
+  name: string;
+  created_at: number;
+}
+```
+
+### `getSuite(id)`
+
+Get a suite by ID.
+
+```typescript
+const suite = store.getSuite(suiteId);
+```
+
+**Returns:** `SuiteRow | undefined`
+
+### `findSuiteByName(name)`
+
+Find a suite by name (returns the most recently created if multiple exist).
+
+```typescript
+const suite = store.findSuiteByName('text2sql-accuracy');
+```
+
+**Returns:** `SuiteRow | undefined`
+
+### `listSuites()`
+
+List all suites, sorted by creation time (newest first).
+
+```typescript
+const suites = store.listSuites();
+for (const suite of suites) {
+  console.log(suite.name);
+}
+```
+
+**Returns:** `SuiteRow[]`
+
+### `renameSuite(id, name)`
+
+Rename a suite.
+
+```typescript
+store.renameSuite(suiteId, 'new-name');
+```
+
+## Runs
+
+### `createRun(run)`
+
+Create a new run.
+
+```typescript
+const runId = store.createRun({
+  suite_id: suite.id,
+  name: 'my-eval',
+  model: 'gpt-4o',
+  config: { temperature: 0.7 },
+});
+```
+
+**Parameters:**
+
+```typescript
+{
+  suite_id: string;
+  name: string;
+  model: string;
+  config?: Record<string, unknown>;
+}
+```
+
+**Returns:** `string` (run ID)
+
+### `getRun(runId)`
+
+Get a run by ID.
+
+```typescript
+const run = store.getRun(runId);
+```
+
+**Returns:** `RunRow | undefined`
+
+```typescript
+interface RunRow {
+  id: string;
+  suite_id: string;
+  name: string;
+  model: string;
+  config: Record<string, unknown> | null;
+  started_at: number;
+  finished_at: number | null;
+  status: 'running' | 'completed' | 'failed';
+  summary: RunSummary | null;
+}
+```
+
+### `listRuns(suiteId?)`
+
+List all runs or filter by suite.
+
+```typescript
+// All runs
+const runs = store.listRuns();
+
+// Runs in a specific suite
+const runs = store.listRuns(suiteId);
+```
+
+**Returns:** `RunRow[]`
+
+### `finishRun(runId, status, summary?)`
+
+Mark a run as completed or failed.
+
+```typescript
+store.finishRun(runId, 'completed', summary);
+```
+
+**Parameters:**
+
+- `runId: string`
+- `status: 'completed' | 'failed'`
+- `summary?: RunSummary`
+
+### `getLatestCompletedRun(suiteId, model?)`
+
+Get the most recent completed run for a suite.
+
+```typescript
+const run = store.getLatestCompletedRun(suiteId);
+
+// Filter by model
+const run = store.getLatestCompletedRun(suiteId, 'gpt-4o');
+```
+
+**Returns:** `RunRow | undefined`
+
+### `renameRun(id, name)`
+
+Rename a run.
+
+```typescript
+store.renameRun(runId, 'new-name');
+```
+
+## Cases
+
+### `saveCases(cases)`
+
+Save one or more cases.
+
+```typescript
+store.saveCases([
+  {
+    id: caseId,
+    run_id: runId,
+    idx: 0,
+    input: { question: 'What is 2+2?' },
+    output: '4',
+    expected: '4',
+    latency_ms: 150,
+    tokens_in: 10,
+    tokens_out: 2,
+  },
+]);
+```
+
+**Parameters:**
+
+```typescript
+interface CaseData {
+  id: string;
+  run_id: string;
+  idx: number;
+  input: unknown;
+  output: string | null;
+  expected?: unknown;
+  latency_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+  error?: string;
+}
+```
+
+### `getCases(runId)`
+
+Get all cases for a run, sorted by index.
+
+```typescript
+const cases = store.getCases(runId);
+for (const c of cases) {
+  console.log(c.idx, c.output);
+}
+```
+
+**Returns:** `CaseRow[]`
+
+```typescript
+interface CaseRow {
+  id: string;
+  run_id: string;
+  idx: number;
+  input: unknown;
+  output: string | null;
+  expected: unknown | null;
+  latency_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+  error: string | null;
+}
+```
+
+### `getFailingCases(runId, threshold?)`
+
+Get cases that scored below a threshold.
+
+```typescript
+const failing = store.getFailingCases(runId, 0.5);
+for (const c of failing) {
+  console.log(`Case #${c.idx}:`, c.scores);
+}
+```
+
+**Parameters:**
+
+- `runId: string`
+- `threshold?: number` (default: 0.5)
+
+**Returns:** `CaseWithScores[]`
+
+```typescript
+interface CaseWithScores extends CaseRow {
+  scores: Array<{ scorer_name: string; score: number; reason: string | null }>;
+}
+```
+
+## Scores
+
+### `saveScores(scores)`
+
+Save one or more scores.
+
+```typescript
+store.saveScores([
+  {
+    id: scoreId,
+    case_id: caseId,
+    scorer_name: 'exact',
+    score: 1.0,
+    reason: undefined,
+  },
+]);
+```
+
+**Parameters:**
+
+```typescript
+interface ScoreData {
+  id: string;
+  case_id: string;
+  scorer_name: string;
+  score: number;
+  reason?: string;
+}
+```
+
+## Summaries
+
+### `getRunSummary(runId, threshold?)`
+
+Compute aggregated statistics for a run.
+
+```typescript
+const summary = store.getRunSummary(runId, 0.5);
+```
+
+**Parameters:**
+
+- `runId: string`
+- `threshold?: number` (default: 0.5) — Minimum score to count as "pass"
+
+**Returns:** `RunSummary`
+
+```typescript
+interface RunSummary {
+  totalCases: number;
+  passCount: number;
+  failCount: number;
+  meanScores: Record<string, number>;
+  totalLatencyMs: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+}
+```
+
+## Prompts (Experimental)
+
+### `createPrompt(name, content)`
+
+Create a versioned prompt.
+
+```typescript
+const prompt = store.createPrompt('my-prompt', 'You are a helpful assistant.');
+// { id: '...', name: 'my-prompt', version: 1, content: '...', created_at: ... }
+
+// Creating again increments version
+const prompt2 = store.createPrompt('my-prompt', 'Updated prompt.');
+// { id: '...', name: 'my-prompt', version: 2, content: '...', created_at: ... }
+```
+
+**Returns:** `PromptRow`
+
+```typescript
+interface PromptRow {
+  id: string;
+  name: string;
+  version: number;
+  content: string;
+  created_at: number;
+}
+```
+
+### `listPrompts()`
+
+List all prompts.
+
+```typescript
+const prompts = store.listPrompts();
+```
+
+**Returns:** `PromptRow[]`
+
+### `getPrompt(id)`
+
+Get a prompt by ID.
+
+```typescript
+const prompt = store.getPrompt(promptId);
+```
+
+**Returns:** `PromptRow | undefined`
+
+### `deletePrompt(id)`
+
+Delete a prompt.
+
+```typescript
+store.deletePrompt(promptId);
+```
+
+## Examples
+
+### Creating and Querying
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+// Create suite
+const suite = store.createSuite('text2sql-accuracy');
+
+// Create run
+const runId = store.createRun({
+  suite_id: suite.id,
+  name: 'baseline',
+  model: 'gpt-4o',
+});
+
+// Save cases and scores
+store.saveCases([{ /* ... */ }]);
+store.saveScores([{ /* ... */ }]);
+
+// Mark as completed
+const summary = store.getRunSummary(runId);
+store.finishRun(runId, 'completed', summary);
+
+// Query runs
+const runs = store.listRuns(suite.id);
+for (const run of runs) {
+  console.log(`${run.model}: ${run.status}`);
+}
+```
+
+### Finding Failed Cases
+
+```typescript
+const failing = store.getFailingCases(runId, 0.8);
+for (const c of failing) {
+  console.log(`Case #${c.idx} failed:`);
+  for (const s of c.scores) {
+    console.log(`  ${s.scorer_name}: ${s.score.toFixed(3)}`);
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Persistence Guide" icon="database" href="/evals/persistence">
+    Learn about run storage
+  </Card>
+  <Card title="Comparison" icon="chart-line" href="/evals/comparison">
+    Compare runs and detect regressions
+  </Card>
+</CardGroup>

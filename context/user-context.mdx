@@ -1,0 +1,545 @@
+---
+title: 'User Context Fragments'
+description: 'Capture user-specific context with identity, preferences, and personalization'
+---
+
+## Overview
+
+User fragments capture user-specific context, preferences, and personalization data that can be injected into AI prompts to tailor responses.
+
+## Fragment Types
+
+<CardGroup cols={2}>
+  <Card title="identity" icon="id-card">
+    User's name and role
+  </Card>
+  <Card title="persona" icon="robot">
+    AI assistant's identity and communication style
+  </Card>
+  <Card title="alias" icon="tag">
+    User-specific vocabulary and term meanings
+  </Card>
+  <Card title="preference" icon="sliders">
+    Output formatting and behavioral preferences
+  </Card>
+  <Card title="userContext" icon="briefcase">
+    Current working focus or project
+  </Card>
+  <Card title="correction" icon="pen">
+    Corrections to previous misunderstandings
+  </Card>
+</CardGroup>
+
+## identity()
+
+Define the user's identity including name and role.
+
+```typescript
+function identity(input: {
+  name?: string;
+  role?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { identity } from '@deepagents/context';
+
+// Full identity
+identity({ name: 'John', role: 'VP of Sales' });
+
+// Role only
+identity({ role: 'Data analyst in the marketing team' });
+
+// Name only
+identity({ name: 'Sarah' });
+
+// Detailed role
+identity({ role: 'Finance manager focused on cost optimization' });
+```
+
+<Tip>
+The `role` field helps tailor explanations, terminology, and focus areas to the user's perspective and needs.
+</Tip>
+
+### Example: Role-Based Context
+
+```typescript
+import { XmlRenderer, identity, term } from '@deepagents/context';
+
+const fragments = [
+  identity({ name: 'Alex', role: 'Sales Manager' }),
+  term('ARR', 'Annual Recurring Revenue'),
+  term('CAC', 'Customer Acquisition Cost'),
+];
+
+const renderer = new XmlRenderer();
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+```xml
+<identity>
+  <name>Alex</name>
+  <role>Sales Manager</role>
+</identity>
+<term>
+  <name>ARR</name>
+  <definition>Annual Recurring Revenue</definition>
+</term>
+<term>
+  <name>CAC</name>
+  <definition>Customer Acquisition Cost</definition>
+</term>
+```
+
+## persona()
+
+Define the AI assistant's persona with name, role, objective, and tone.
+
+```typescript
+function persona(input: {
+  name: string;
+  role?: string;
+  objective?: string;
+  tone?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { persona } from '@deepagents/context';
+
+// Basic persona
+persona({
+  name: 'DataBot',
+  role: 'SQL Expert',
+});
+
+// With objective
+persona({
+  name: 'QueryMaster',
+  role: 'Database Analyst',
+  objective: 'Generate accurate SQL queries from natural language',
+});
+
+// Full persona with tone
+persona({
+  name: 'Freya',
+  role: 'Data Assistant',
+  objective: 'Help users explore and understand their data',
+  tone: 'friendly and professional',
+});
+```
+
+### Example: Complete Persona
+
+```typescript
+import { XmlRenderer, persona, identity } from '@deepagents/context';
+
+const fragments = [
+  identity({ name: 'Sarah', role: 'Product Manager' }),
+  persona({
+    name: 'AnalyticsAI',
+    role: 'Product Analytics Assistant',
+    objective: 'Provide insights on user behavior and product metrics',
+    tone: 'concise and data-driven',
+  }),
+];
+
+const renderer = new XmlRenderer();
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+```xml
+<identity>
+  <name>Sarah</name>
+  <role>Product Manager</role>
+</identity>
+<persona>
+  <name>AnalyticsAI</name>
+  <role>Product Analytics Assistant</role>
+  <objective>Provide insights on user behavior and product metrics</objective>
+  <tone>concise and data-driven</tone>
+</persona>
+```
+
+## alias()
+
+Define user-specific term meanings and vocabulary.
+
+```typescript
+function alias(term: string, meaning: string): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { alias } from '@deepagents/context';
+
+// Disambiguate terms
+alias('revenue', 'gross revenue before deductions, not net');
+
+// Map user language to data
+alias('active users', 'users who logged in within the last 30 days');
+
+// Table nicknames
+alias('the big table', 'the orders table');
+
+// Fiscal periods
+alias('Q4', 'October through December, not fiscal Q4');
+```
+
+<Note>
+**Alias vs Glossary:**
+- `alias()` maps user vocabulary to table/column names ("the big table" → "orders table")
+- `glossary()` maps terms to SQL expressions ("revenue" → "SUM(amount)")
+
+Use `alias()` for personalization, `glossary()` for computation.
+</Note>
+
+### Example: User Vocabulary
+
+```typescript
+import { alias, term } from '@deepagents/context';
+
+const fragments = [
+  // Standard domain term
+  term('MRR', 'Monthly Recurring Revenue'),
+  
+  // User's personal interpretation
+  alias('revenue', 'MRR excluding one-time fees'),
+  
+  // User's table nickname
+  alias('customer data', 'the customers_v2 view'),
+];
+```
+
+## preference()
+
+Define how the user prefers results presented.
+
+```typescript
+function preference(aspect: string, value: string): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { preference } from '@deepagents/context';
+
+// Date formatting
+preference('date format', 'YYYY-MM-DD');
+
+// Output style
+preference('output style', 'tables over charts unless showing trends');
+
+// Verbosity
+preference('detail level', 'always show the SQL query in responses');
+
+// Default limits
+preference('row limit', 'default to 50 rows unless I ask for more');
+
+// Explanation style
+preference('explanation style', 'brief and to the point');
+```
+
+### Example: User Preferences
+
+```typescript
+import { XmlRenderer, preference, identity } from '@deepagents/context';
+
+const fragments = [
+  identity({ name: 'Jordan', role: 'Data Engineer' }),
+  preference('output format', 'always include SQL with results'),
+  preference('date format', 'ISO 8601 (YYYY-MM-DD)'),
+  preference('timezone', 'UTC for all timestamps'),
+  preference('decimal precision', '2 places for currency, 4 for percentages'),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+```xml
+<identity>
+  <name>Jordan</name>
+  <role>Data Engineer</role>
+</identity>
+<preferences>
+  <preference>
+    <aspect>output format</aspect>
+    <value>always include SQL with results</value>
+  </preference>
+  <preference>
+    <aspect>date format</aspect>
+    <value>ISO 8601 (YYYY-MM-DD)</value>
+  </preference>
+  <preference>
+    <aspect>timezone</aspect>
+    <value>UTC for all timestamps</value>
+  </preference>
+  <preference>
+    <aspect>decimal precision</aspect>
+    <value>2 places for currency, 4 for percentages</value>
+  </preference>
+</preferences>
+```
+
+## userContext()
+
+Define the user's current working focus or project.
+
+```typescript
+function userContext(description: string): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { userContext } from '@deepagents/context';
+
+// Current project
+userContext('Preparing Q4 board presentation');
+
+// Investigation
+userContext('Investigating drop in signups last week');
+
+// Regional focus
+userContext('Working on EMEA regional analysis for strategy meeting');
+
+// Debugging
+userContext('Debugging discrepancy in revenue numbers');
+```
+
+<Tip>
+Update `userContext()` as the user's focus changes. It helps the AI make better assumptions and suggestions based on what the user is currently working on.
+</Tip>
+
+### Example: Context-Aware Assistance
+
+```typescript
+import { userContext, preference } from '@deepagents/context';
+
+const fragments = [
+  userContext('Preparing monthly executive dashboard for CEO'),
+  preference('aggregation', 'monthly summaries, not daily details'),
+  preference('focus metrics', 'revenue, user growth, and churn'),
+];
+```
+
+## correction()
+
+Record corrections the user made to previous understanding.
+
+```typescript
+function correction(
+  subject: string,
+  clarification: string
+): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { correction } from '@deepagents/context';
+
+// Data type correction
+correction(
+  'status column',
+  '1 = active, 0 = inactive, not boolean true/false'
+);
+
+// Table correction
+correction(
+  'orders table',
+  'Use orders_v2, not the deprecated legacy_orders table'
+);
+
+// Field meaning correction
+correction(
+  'date field',
+  'order_date is when order was placed, ship_date is when shipped'
+);
+
+// Calculation correction
+correction(
+  'revenue calculation',
+  'Must exclude refunds and chargebacks'
+);
+```
+
+<Warning>
+Corrections are persistent reminders of past mistakes. They help prevent the AI from repeating the same misunderstandings.
+</Warning>
+
+### Example: Learning from Mistakes
+
+```typescript
+import { XmlRenderer, correction, userContext } from '@deepagents/context';
+
+const fragments = [
+  userContext('Analyzing user retention metrics'),
+  correction(
+    'active users',
+    'Active = logged in within 30 days, not just signed up'
+  ),
+  correction(
+    'retention calculation',
+    'Compare cohorts month-over-month, not cumulative'
+  ),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+```xml
+<userContext>Analyzing user retention metrics</userContext>
+<corrections>
+  <correction>
+    <subject>active users</subject>
+    <clarification>Active = logged in within 30 days, not just signed up</clarification>
+  </correction>
+  <correction>
+    <subject>retention calculation</subject>
+    <clarification>Compare cohorts month-over-month, not cumulative</clarification>
+  </correction>
+</corrections>
+```
+
+## Combining User Fragments
+
+User fragments work best when combined to create a complete user profile:
+
+```typescript
+import {
+  identity,
+  persona,
+  preference,
+  userContext,
+  alias,
+  correction,
+} from '@deepagents/context';
+
+const userProfile = [
+  // Who is the user?
+  identity({
+    name: 'Morgan',
+    role: 'Head of Revenue Operations',
+  }),
+  
+  // What are they working on?
+  userContext('Building automated revenue forecasting model'),
+  
+  // How do they prefer results?
+  preference('date format', 'YYYY-MM-DD'),
+  preference('output', 'always show confidence intervals'),
+  preference('aggregation', 'weekly rolling averages'),
+  
+  // Their vocabulary
+  alias('bookings', 'closed-won deals with signed contracts'),
+  alias('pipeline', 'opportunities in stages 3-6'),
+  
+  // Past corrections
+  correction(
+    'revenue recognition',
+    'Use booking_date, not payment_date for revenue timing'
+  ),
+];
+```
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Personalized Explanations">
+    Tailor explanations based on user role:
+    
+    ```typescript
+    identity({ role: 'Marketing Manager' })
+    // AI focuses on CAC, conversion rates, campaign metrics
+    
+    identity({ role: 'CFO' })
+    // AI focuses on revenue, costs, margins, forecasts
+    ```
+  </Accordion>
+  
+  <Accordion title="Custom Vocabulary">
+    Handle organization-specific terminology:
+    
+    ```typescript
+    alias('active customer', 'made purchase in last 90 days')
+    alias('churn', 'no activity for 180+ days')
+    alias('revenue', 'net revenue after returns and discounts')
+    ```
+  </Accordion>
+  
+  <Accordion title="Output Formatting">
+    Consistent formatting across sessions:
+    
+    ```typescript
+    preference('currency', 'always USD with $ symbol')
+    preference('large numbers', 'use K/M/B abbreviations')
+    preference('dates', 'relative dates like "2 days ago" for recent')
+    ```
+  </Accordion>
+  
+  <Accordion title="Context-Aware Defaults">
+    Make better assumptions based on current focus:
+    
+    ```typescript
+    userContext('Analyzing Q4 holiday season performance')
+    // AI automatically filters to Q4, focuses on seasonal metrics
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<Steps>
+  <Step title="Start with Identity">
+    Always include `identity()` to establish who the user is and what perspective they have.
+  </Step>
+  
+  <Step title="Keep Preferences Specific">
+    Make preferences actionable:
+    
+    ```typescript
+    // Good: Specific
+    preference('date format', 'YYYY-MM-DD for dates, HH:mm for times')
+    
+    // Avoid: Vague
+    preference('format', 'make it look nice')
+    ```
+  </Step>
+  
+  <Step title="Update Context Frequently">
+    Change `userContext()` as the user's focus shifts to keep assistance relevant.
+  </Step>
+  
+  <Step title="Record All Corrections">
+    Never let the AI repeat mistakes - always add `correction()` when the user clarifies.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Messages" icon="message" href="/context/messages">
+    Work with conversation messages and reminders
+  </Card>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Add business logic and domain knowledge
+  </Card>
+  <Card title="Renderers" icon="code" href="/context/renderers">
+    Transform fragments into different formats
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/context/api/fragment-builders">
+    Complete API documentation
+  </Card>
+</CardGroup>

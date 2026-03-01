@@ -1,0 +1,173 @@
+---
+title: MySQL / MariaDB Adapter
+description: Setup and configuration for MySQL and MariaDB databases
+---
+
+# MySQL / MariaDB Adapter
+
+The MySQL adapter supports both MySQL and MariaDB databases with full compatibility.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+npm install mysql2
+```
+
+## Basic Usage
+
+```typescript
+import { Mysql, tables, views, info } from '@deepagents/text2sql/mysql';
+import mysql from 'mysql2/promise';
+
+const pool = mysql.createPool({
+  host: 'localhost',
+  database: 'mydb',
+  user: 'root',
+  password: 'password'
+});
+
+const adapter = new Mysql({
+  execute: async (sql) => {
+    const [rows] = await pool.execute(sql);
+    return rows;
+  },
+  grounding: [tables(), views(), info()],
+  databases: ['mydb']  // Optional: limit to specific databases
+});
+```
+
+## MariaDB Usage
+
+```typescript
+import { Mariadb, tables } from '@deepagents/text2sql/mysql';
+
+const adapter = new Mariadb({
+  execute: async (sql) => {
+    const [rows] = await pool.execute(sql);
+    return rows;
+  },
+  grounding: [tables()]
+});
+```
+
+## Configuration
+
+```typescript
+interface MysqlAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+  databases?: string[];  // Limit to specific databases
+}
+```
+
+## MySQL Features
+
+### Identifier Quoting
+MySQL uses backticks:
+
+```typescript
+adapter.quoteIdentifier('my_table');  // `my_table`
+adapter.quoteIdentifier('my column'); // `my column`
+```
+
+### LIMIT Clause
+
+```sql
+SELECT * FROM customers LIMIT 10
+```
+
+### System Databases
+
+Excluded by default:
+- `mysql`
+- `information_schema`
+- `performance_schema`
+- `sys`
+
+## Error Handling
+
+| Error Code | Type | Suggestion |
+|------------|------|------------|
+| 1146 | MISSING_TABLE | Check database for correct table name |
+| 1054 | INVALID_COLUMN | Verify column exists |
+| 1064 | SYNTAX_ERROR | Review keywords and punctuation |
+| 1305 | INVALID_FUNCTION | Function not recognized |
+
+## Complete Example
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { Mysql, tables, constraints } from '@deepagents/text2sql/mysql';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import mysql from 'mysql2/promise';
+
+const pool = mysql.createPool({
+  host: 'localhost',
+  database: 'ecommerce',
+  user: 'root',
+  password: 'password',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+const adapter = new Mysql({
+  execute: async (sql) => {
+    const [rows] = await pool.execute(sql);
+    return rows;
+  },
+  grounding: [tables(), constraints()]
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter,
+  store: new InMemoryContextStore()
+});
+
+const sql = await text2sql.toSql('Show top 10 customers by revenue');
+console.log(sql);
+```
+
+## Best Practices
+
+### 1. Use Connection Pooling
+
+```typescript
+const pool = mysql.createPool({
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'mydb',
+  connectionLimit: 10
+});
+```
+
+### 2. Use Indexes
+
+```sql
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE UNIQUE INDEX idx_users_username ON users(username);
+```
+
+### 3. Optimize Queries
+
+```sql
+-- Use EXPLAIN to analyze
+EXPLAIN SELECT * FROM customers WHERE email = 'test@example.com';
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="BigQuery Adapter" icon="cloud" href="/text2sql/adapters/bigquery">
+    Setup for Google BigQuery
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API
+  </Card>
+</CardGroup>

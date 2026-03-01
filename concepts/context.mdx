@@ -1,0 +1,466 @@
+---
+title: 'Context Management'
+description: 'Share state and data across agents and tools'
+---
+
+## What is Context?
+
+Context is a shared state object that:
+- Persists across agent executions
+- Passes data between agents during handoffs
+- Provides tools access to runtime state
+- Enables type-safe state management
+
+```typescript
+interface AppContext {
+  userId: string;
+  sessionId: string;
+  preferences: Record<string, any>;
+}
+
+const context: AppContext = {
+  userId: 'user123',
+  sessionId: 'session456',
+  preferences: {},
+};
+
+const stream = execute(agent, message, context);
+```
+
+## Basic Usage
+
+### Simple Context
+
+```typescript
+const stream = execute(
+  agent,
+  'Hello',
+  { userId: 'user123' }
+);
+```
+
+### Typed Context
+
+```typescript
+interface UserContext {
+  userId: string;
+  email: string;
+  tier: 'free' | 'pro' | 'enterprise';
+}
+
+const agent = agent<unknown, UserContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    // ctx is typed as UserContext | undefined
+    return `You are helping ${ctx?.tier} user ${ctx?.userId}`;
+  },
+});
+
+const context: UserContext = {
+  userId: 'user123',
+  email: 'user@example.com',
+  tier: 'pro',
+};
+
+const stream = execute(agent, 'Help me', context);
+```
+
+## Context in Prompts
+
+Use context to create dynamic prompts:
+
+```typescript
+interface TaskContext {
+  taskType: 'research' | 'coding' | 'writing';
+  deadline?: Date;
+  constraints: string[];
+}
+
+const agent = agent<unknown, TaskContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    const parts = ['You are a helpful assistant.'];
+    
+    if (ctx?.taskType === 'research') {
+      parts.push('Focus on gathering accurate information.');
+    } else if (ctx?.taskType === 'coding') {
+      parts.push('Write clean, maintainable code.');
+    }
+    
+    if (ctx?.deadline) {
+      parts.push(`Complete by ${ctx.deadline.toISOString()}.`);
+    }
+    
+    if (ctx?.constraints.length) {
+      parts.push(`Constraints: ${ctx.constraints.join(', ')}`);
+    }
+    
+    return parts.join('\n');
+  },
+});
+```
+
+## Context in Tools
+
+Access context inside tool execution:
+
+```typescript
+import { toState } from '@deepagents/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+interface AppContext {
+  userId: string;
+  apiKey: string;
+  datastore: Map<string, any>;
+}
+
+const saveDataTool = tool({
+  description: 'Save data to user storage',
+  parameters: z.object({
+    key: z.string(),
+    value: z.any(),
+  }),
+  execute: async ({ key, value }, options) => {
+    const ctx = toState<AppContext>(options);
+    
+    // Access context properties
+    console.log('Saving for user:', ctx.userId);
+    
+    // Mutate context
+    ctx.datastore.set(key, value);
+    
+    return { success: true, key };
+  },
+});
+
+const agent = agent<unknown, AppContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You help manage user data.',
+  tools: { saveData: saveDataTool },
+});
+
+const context: AppContext = {
+  userId: 'user123',
+  apiKey: 'key_...',
+  datastore: new Map(),
+};
+
+const stream = execute(agent, 'Save theme=dark', context);
+await stream.text;
+
+console.log(context.datastore.get('theme')); // 'dark'
+```
+
+<Note>
+Context is mutable. Tools and agents can modify it, and changes persist across the execution.
+</Note>
+
+## Context Across Handoffs
+
+Context flows through agent handoffs:
+
+```typescript
+interface WorkflowContext {
+  userId: string;
+  steps: string[];
+  data: Record<string, any>;
+}
+
+const stepOne = agent<unknown, WorkflowContext>({
+  name: 'step_one',
+  model: openai('gpt-4o'),
+  prompt: 'Complete step one.',
+  prepareEnd: async ({ contextVariables }) => {
+    contextVariables.steps.push('step_one');
+    contextVariables.data.stepOneResult = 'completed';
+  },
+});
+
+const stepTwo = agent<unknown, WorkflowContext>({
+  name: 'step_two',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    const previousResult = ctx?.data.stepOneResult;
+    return `Complete step two. Previous: ${previousResult}`;
+  },
+  prepareEnd: async ({ contextVariables }) => {
+    contextVariables.steps.push('step_two');
+    contextVariables.data.stepTwoResult = 'completed';
+  },
+});
+
+const coordinator = agent<unknown, WorkflowContext>({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: 'Execute workflow steps in order.',
+  handoffs: [stepOne, stepTwo],
+});
+
+const ctx: WorkflowContext = {
+  userId: 'user123',
+  steps: [],
+  data: {},
+};
+
+const stream = swarm(coordinator, 'Run workflow', ctx);
+await stream.text;
+
+console.log(ctx.steps); // ['step_one', 'step_two']
+console.log(ctx.data); // { stepOneResult: 'completed', stepTwoResult: 'completed' }
+```
+
+## Context Transformations
+
+Transform context between agents:
+
+```typescript
+interface InputContext {
+  rawData: string;
+}
+
+interface OutputContext {
+  processedData: object;
+}
+
+const processor = agent<unknown, InputContext, OutputContext>({
+  name: 'processor',
+  model: openai('gpt-4o'),
+  prompt: 'Process the raw data.',
+  prepareEnd: async ({ contextVariables }) => {
+    // Transform InputContext to OutputContext
+    const processed = JSON.parse(contextVariables.rawData);
+    Object.assign(contextVariables, { processedData: processed });
+    delete contextVariables.rawData;
+  },
+});
+```
+
+<Warning>
+Type transformations are advanced usage. Ensure proper type casting and validation when transforming context types.
+</Warning>
+
+## Context Stores
+
+Persist context across sessions using `@deepagents/context`:
+
+```typescript
+import { InMemoryContextStore } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+
+// Save context
+await store.save('session123', {
+  userId: 'user123',
+  conversationHistory: [...],
+});
+
+// Load context
+const context = await store.load('session123');
+
+// Delete context
+await store.delete('session123');
+```
+
+### SQLite Store
+
+Persistent storage with SQLite:
+
+```typescript
+import { SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./context.db');
+
+await store.save('session123', context);
+const loaded = await store.load('session123');
+```
+
+### PostgreSQL Store
+
+Production-grade persistence:
+
+```typescript
+import { PostgresContextStore } from '@deepagents/context';
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const store = new PostgresContextStore(pool);
+
+await store.save('session123', context);
+const loaded = await store.load('session123');
+```
+
+## Context Fragments
+
+The `@deepagents/context` package provides fragment builders for structured context:
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  identity,
+  XmlRenderer,
+} from '@deepagents/context';
+
+const fragments = [
+  term('MRR', 'monthly recurring revenue'),
+  hint('Always exclude test accounts'),
+  guardrail({
+    rule: 'Never expose PII',
+    reason: 'Privacy compliance',
+    action: 'Aggregate data instead',
+  }),
+  identity({ role: 'Data Analyst' }),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+const contextXml = renderer.render(fragments);
+
+// Use in prompt
+const agent = agent({
+  name: 'analyst',
+  model: openai('gpt-4o'),
+  prompt: `${contextXml}\n\nAnalyze the data.`,
+});
+```
+
+See the [Context Package](/packages/context) for full fragment documentation.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Type Interfaces" icon="code">
+    Always define TypeScript interfaces for context
+  </Card>
+  <Card title="Immutable IDs" icon="fingerprint">
+    Keep identifiers like userId immutable
+  </Card>
+  <Card title="Clear Naming" icon="tag">
+    Use descriptive property names
+  </Card>
+  <Card title="Validation" icon="shield-check">
+    Validate context before using in tools
+  </Card>
+  <Card title="Minimal Data" icon="minimize">
+    Only store what's needed across executions
+  </Card>
+  <Card title="Cleanup" icon="broom">
+    Remove temporary data in prepareEnd
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### User Session
+
+```typescript
+interface SessionContext {
+  userId: string;
+  sessionId: string;
+  createdAt: Date;
+  lastActivity: Date;
+  conversationHistory: UIMessage[];
+}
+```
+
+### Multi-Step Workflow
+
+```typescript
+interface WorkflowContext {
+  workflowId: string;
+  currentStep: number;
+  completedSteps: string[];
+  stepResults: Record<string, any>;
+  errors: Array<{ step: string; error: string }>;
+}
+```
+
+### Feature Flags
+
+```typescript
+interface FeatureContext {
+  userId: string;
+  features: {
+    advancedAnalytics: boolean;
+    betaFeatures: boolean;
+    customBranding: boolean;
+  };
+}
+
+const agent = agent<unknown, FeatureContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    const capabilities = [];
+    if (ctx?.features.advancedAnalytics) {
+      capabilities.push('advanced analytics');
+    }
+    if (ctx?.features.betaFeatures) {
+      capabilities.push('beta features');
+    }
+    return `Available capabilities: ${capabilities.join(', ')}`;
+  },
+});
+```
+
+### Accumulator Pattern
+
+```typescript
+interface AccumulatorContext {
+  items: string[];
+  count: number;
+  total: number;
+}
+
+const processor = agent<unknown, AccumulatorContext>({
+  name: 'processor',
+  model: openai('gpt-4o'),
+  prompt: 'Process items.',
+  tools: {
+    processItem: tool({
+      description: 'Process an item',
+      parameters: z.object({ value: z.number() }),
+      execute: async ({ value }, options) => {
+        const ctx = toState<AccumulatorContext>(options);
+        ctx.items.push(`item_${ctx.count}`);
+        ctx.count++;
+        ctx.total += value;
+        return { processed: true };
+      },
+    }),
+  },
+});
+```
+
+## Anti-Patterns
+
+<Warning>
+Avoid these common mistakes:
+
+- **Large Objects** - Storing entire databases or large arrays
+- **Untyped Context** - Using `any` or `Record<string, unknown>`
+- **Sensitive Data** - Storing passwords or keys directly
+- **Circular References** - Objects that reference themselves
+- **Side Effects** - Modifying global state from context
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Streaming" icon="water" href="/concepts/streaming">
+    Learn about streaming responses
+  </Card>
+  <Card title="Context Package" icon="layer-group" href="/packages/context">
+    Explore the context management package
+  </Card>
+  <Card title="Agent Package" icon="robot" href="/packages/agent">
+    Full agent API reference
+  </Card>
+</CardGroup>

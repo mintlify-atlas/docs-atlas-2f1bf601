@@ -1,0 +1,323 @@
+---
+title: Scorers
+description: Built-in scorer functions and combinators for evaluation
+---
+
+# Scorers
+
+Scorers evaluate the quality of LLM outputs. All scorers return a `ScorerResult`:
+
+```typescript
+interface ScorerResult {
+  score: number;  // 0..1 (0 = worst, 1 = best)
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+## Deterministic Scorers
+
+These scorers use rule-based logic and don't require LLM calls.
+
+### `exactMatch`
+
+Strict string equality between output and expected:
+
+```typescript
+import { exactMatch } from '@deepagents/evals/scorers';
+
+const result = await exactMatch({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if output exactly matches expected
+- `0.0` otherwise, with a `reason` explaining the mismatch
+
+### `includes`
+
+Substring check — passes if output contains expected:
+
+```typescript
+import { includes } from '@deepagents/evals/scorers';
+
+const result = await includes({
+  input: 'What is the capital of France?',
+  output: 'The capital of France is Paris.',
+  expected: 'Paris',
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if output includes expected as a substring
+- `0.0` otherwise
+
+### `regex(pattern)`
+
+Regular expression test:
+
+```typescript
+import { regex } from '@deepagents/evals/scorers';
+
+const emailScorer = regex(/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i);
+
+const result = await emailScorer({
+  input: 'Extract the email',
+  output: 'user@example.com',
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if pattern matches
+- `0.0` otherwise
+
+### `levenshtein`
+
+Normalized edit distance similarity:
+
+```typescript
+import { levenshtein } from '@deepagents/evals/scorers';
+
+const result = await levenshtein({
+  input: 'Spell "hello"',
+  output: 'helo',
+  expected: 'hello',
+});
+// { score: 0.8 } (80% similar)
+```
+
+**Returns:**
+
+- `1.0` for exact match
+- `0.0` for completely different strings
+- Decimal between 0 and 1 for partial similarity
+
+### `jsonMatch`
+
+Deep structural equality for JSON objects:
+
+```typescript
+import { jsonMatch } from '@deepagents/evals/scorers';
+
+const result = await jsonMatch({
+  input: 'Generate JSON',
+  output: '{"name":"Alice","age":30}',
+  expected: { name: 'Alice', age: 30 },
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if JSON structures are deeply equal (order-independent for objects)
+- `0.0` if structures differ or JSON is invalid
+
+## LLM-Based Scorers
+
+These scorers use LLMs to evaluate output quality.
+
+### `factuality(config)`
+
+Checks if the output is factually correct given the expected value:
+
+```typescript
+import { factuality } from '@deepagents/evals/scorers';
+
+const factScorer = factuality({ model: 'gpt-4o-mini' });
+
+const result = await factScorer({
+  input: 'What is the capital of France?',
+  output: 'Paris is the capital and largest city of France.',
+  expected: 'Paris',
+});
+// { score: 1.0, reason: 'Output is factually correct' }
+```
+
+**Config:**
+
+```typescript
+{
+  model: string; // OpenAI-compatible model ID
+}
+```
+
+**Returns:**
+
+- `1.0` if output is factually consistent with expected
+- `0.0` if output contradicts expected
+- Decimal between 0 and 1 for partial correctness
+- `reason` field contains LLM's explanation
+
+<Note>
+The `factuality` scorer uses the [autoevals](https://github.com/braintrustdata/autoevals) library and requires an `OPENAI_API_KEY` environment variable.
+</Note>
+
+## Combinators
+
+Combinators compose multiple scorers into one.
+
+### `all(...scorers)`
+
+**Weakest-link (minimum score)** — All scorers must pass:
+
+```typescript
+import { all, exactMatch, includes } from '@deepagents/evals/scorers';
+
+const strict = all(exactMatch, includes);
+
+const result = await strict({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0 } (both scorers passed)
+```
+
+**Returns:**
+
+- The **minimum** score of all scorers
+- Concatenated reasons from all scorers
+
+### `any(...scorers)`
+
+**Best-of (maximum score)** — At least one scorer must pass:
+
+```typescript
+import { any, exactMatch, includes } from '@deepagents/evals/scorers';
+
+const lenient = any(exactMatch, includes);
+
+const result = await lenient({
+  input: 'What is the capital of France?',
+  output: 'The capital is Paris.',
+  expected: 'Paris',
+});
+// { score: 1.0 } (includes passed)
+```
+
+**Returns:**
+
+- The **maximum** score of all scorers
+- Reason from the highest-scoring scorer
+
+### `weighted(config)`
+
+**Weighted average** — Combine scorers with different weights:
+
+```typescript
+import { weighted, exactMatch, factuality } from '@deepagents/evals/scorers';
+
+const balanced = weighted({
+  accuracy: { scorer: exactMatch, weight: 2 },
+  grounding: { scorer: factuality({ model: 'gpt-4o-mini' }), weight: 1 },
+});
+
+const result = await balanced({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0, reason: 'accuracy: 1.00 (w=2), grounding: 1.00 (w=1)' }
+```
+
+**Config:**
+
+```typescript
+{
+  [name: string]: {
+    scorer: Scorer;
+    weight: number;
+  }
+}
+```
+
+**Returns:**
+
+- Weighted average: `sum(score * weight) / sum(weight)`
+- Reason lists all scorer scores and weights
+
+## Custom Scorers
+
+You can create custom scorers by implementing the `Scorer` type:
+
+```typescript
+import type { Scorer } from '@deepagents/evals/scorers';
+
+const myScorer: Scorer = async ({ input, output, expected }) => {
+  // Your scoring logic here
+  const score = output.length > 10 ? 1.0 : 0.5;
+  return { score, reason: `Output length: ${output.length}` };
+};
+```
+
+**Type signature:**
+
+```typescript
+type Scorer = (args: ScorerArgs) => Promise<ScorerResult>;
+
+interface ScorerArgs {
+  input: unknown;
+  output: string;
+  expected?: unknown;
+}
+
+interface ScorerResult {
+  score: number;  // Must be 0..1
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+<Warning>
+Scorer scores **must** be between 0 and 1. Out-of-range scores will be clamped and logged as warnings.
+</Warning>
+
+## Usage in Evaluation
+
+Scorers are passed to `evaluate()` as a record:
+
+```typescript
+import { evaluate, exactMatch, includes } from '@deepagents/evals';
+
+await evaluate({
+  // ...
+  scorers: {
+    exact: exactMatch,
+    contains: includes,
+    custom: myScorer,
+  },
+});
+```
+
+Each scorer runs independently. A case **passes** if **all** scorers return `>= threshold`.
+
+## Scorer Comparison
+
+| Scorer | Speed | LLM Required | Use Case |
+| --- | --- | --- | --- |
+| `exactMatch` | ⚡️ Instant | No | Exact string matching |
+| `includes` | ⚡️ Instant | No | Substring presence |
+| `regex` | ⚡️ Instant | No | Pattern matching |
+| `levenshtein` | ⚡️ Fast | No | Fuzzy string similarity |
+| `jsonMatch` | ⚡️ Fast | No | JSON structure equality |
+| `factuality` | 🐢 Slow | Yes | Semantic correctness |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/evals/api/scorers">
+    Full scorer API documentation
+  </Card>
+  <Card title="Comparison" icon="chart-line" href="/evals/comparison">
+    Compare runs with scorer deltas
+  </Card>
+</CardGroup>

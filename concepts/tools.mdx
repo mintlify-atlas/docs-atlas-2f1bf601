@@ -1,0 +1,426 @@
+---
+title: 'Tool Integration'
+description: 'Give agents the ability to interact with external systems'
+---
+
+## What are Tools?
+
+Tools are functions that agents can call to:
+- Query databases
+- Make API requests
+- Read/write files
+- Perform calculations
+- Access external services
+
+DeepAgents uses the [Vercel AI SDK](https://sdk.vercel.ai/docs) tool format for seamless integration.
+
+## Creating Tools
+
+### Basic Tool
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const weatherTool = tool({
+  description: 'Get current weather for a location',
+  parameters: z.object({
+    location: z.string().describe('City name or coordinates'),
+    units: z.enum(['celsius', 'fahrenheit']).default('celsius'),
+  }),
+  execute: async ({ location, units }) => {
+    const response = await fetch(
+      `https://api.weather.com/v1/current?location=${location}&units=${units}`
+    );
+    return await response.json();
+  },
+});
+```
+
+### Tool with Context
+
+Access agent context inside tools:
+
+```typescript
+import { toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  apiKey: string;
+}
+
+const saveNoteTool = tool({
+  description: 'Save a note for the user',
+  parameters: z.object({
+    title: z.string(),
+    content: z.string(),
+  }),
+  execute: async ({ title, content }, options) => {
+    const ctx = toState<AppContext>(options);
+    
+    await saveToDatabase({
+      userId: ctx.userId,
+      title,
+      content,
+      apiKey: ctx.apiKey,
+    });
+    
+    return { success: true, id: '...' };
+  },
+});
+```
+
+### Dynamic Tools
+
+Create tools at runtime:
+
+```typescript
+import { dynamicTool } from 'ai';
+
+function createDatabaseTool(tableName: string) {
+  return dynamicTool({
+    description: `Query the ${tableName} table`,
+    parameters: z.object({
+      query: z.string(),
+    }),
+    execute: async ({ query }) => {
+      return await db.query(`SELECT * FROM ${tableName} WHERE ${query}`);
+    },
+  });
+}
+
+const tools = {
+  queryUsers: createDatabaseTool('users'),
+  queryOrders: createDatabaseTool('orders'),
+};
+```
+
+## Using Tools with Agents
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You help users with weather and time information.',
+  tools: {
+    getWeather: weatherTool,
+    getCurrentTime: timeTool,
+  },
+});
+
+const stream = execute(
+  assistant,
+  'What is the weather in Tokyo?',
+  {}
+);
+
+console.log(await stream.text);
+```
+
+The agent automatically:
+1. Analyzes the user message
+2. Decides which tool to call
+3. Calls the tool with appropriate parameters
+4. Formats the result into a natural language response
+
+## Tool Schemas
+
+### Parameter Descriptions
+
+Help the agent understand parameters:
+
+```typescript
+const searchTool = tool({
+  description: 'Search for information online',
+  parameters: z.object({
+    query: z
+      .string()
+      .describe('The search query, use specific keywords'),
+    maxResults: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .default(5)
+      .describe('Maximum number of results to return'),
+    dateRange: z
+      .enum(['day', 'week', 'month', 'year', 'all'])
+      .optional()
+      .describe('Filter results by date'),
+  }),
+  execute: async ({ query, maxResults, dateRange }) => {
+    return performSearch(query, maxResults, dateRange);
+  },
+});
+```
+
+### Complex Types
+
+Use nested schemas for structured data:
+
+```typescript
+const createOrderTool = tool({
+  description: 'Create a new order',
+  parameters: z.object({
+    customer: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    items: z.array(
+      z.object({
+        productId: z.string(),
+        quantity: z.number().int().min(1),
+        price: z.number().positive(),
+      })
+    ),
+    shippingAddress: z.object({
+      street: z.string(),
+      city: z.string(),
+      postalCode: z.string(),
+      country: z.string(),
+    }),
+  }),
+  execute: async (params) => {
+    return await createOrder(params);
+  },
+});
+```
+
+## Tool Selection
+
+Control when agents use tools:
+
+### Auto (Default)
+
+```typescript
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+  tools: { search: searchTool },
+  toolChoice: 'auto', // Agent decides
+});
+```
+
+### Required
+
+```typescript
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You must use tools.',
+  tools: { search: searchTool },
+  toolChoice: 'required', // Must use a tool
+});
+```
+
+### None
+
+```typescript
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You respond directly.',
+  tools: { search: searchTool },
+  toolChoice: 'none', // Never use tools
+});
+```
+
+### Specific Tool
+
+```typescript
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You search for information.',
+  tools: { search: searchTool, weather: weatherTool },
+  toolChoice: { type: 'tool', name: 'search' }, // Force search tool
+});
+```
+
+## Error Handling
+
+### Try-Catch in Tools
+
+```typescript
+const apiTool = tool({
+  description: 'Call external API',
+  parameters: z.object({ endpoint: z.string() }),
+  execute: async ({ endpoint }) => {
+    try {
+      const response = await fetch(`https://api.example.com/${endpoint}`);
+      if (!response.ok) {
+        return {
+          error: true,
+          message: `API returned ${response.status}`,
+        };
+      }
+      return await response.json();
+    } catch (error) {
+      return {
+        error: true,
+        message: error.message,
+      };
+    }
+  },
+});
+```
+
+### Validation in Tools
+
+```typescript
+const dbQueryTool = tool({
+  description: 'Query database',
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => {
+    // Validate query is read-only
+    const lowerQuery = query.toLowerCase();
+    if (
+      lowerQuery.includes('delete') ||
+      lowerQuery.includes('update') ||
+      lowerQuery.includes('insert') ||
+      lowerQuery.includes('drop')
+    ) {
+      return {
+        error: true,
+        message: 'Only SELECT queries are allowed',
+      };
+    }
+    
+    return await db.query(query);
+  },
+});
+```
+
+## Pre-built Tools
+
+DeepAgents provides ready-to-use tools in `@deepagents/toolbox`:
+
+```typescript
+import { ddgSearch, hackernewsSearch, weather } from '@deepagents/toolbox';
+
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You help users find information.',
+  tools: {
+    search: ddgSearch,
+    news: hackernewsSearch,
+    weather: weather,
+  },
+});
+```
+
+### Available Tools
+
+<CardGroup cols={2}>
+  <Card title="ddgSearch" icon="magnifying-glass">
+    DuckDuckGo web search
+  </Card>
+  <Card title="hackernewsSearch" icon="hacker-news">
+    HackerNews article search
+  </Card>
+  <Card title="weather" icon="cloud">
+    Weather information
+  </Card>
+  <Card title="filesystem" icon="folder">
+    File read/write operations
+  </Card>
+  <Card title="webSearch" icon="globe">
+    General web search
+  </Card>
+  <Card title="scratchpad" icon="note-sticky">
+    Temporary note storage
+  </Card>
+</CardGroup>
+
+See the [Toolbox Package](/packages/toolbox) for complete documentation.
+
+## Tool Composition
+
+### Wrapping Tools
+
+Add logging or metrics:
+
+```typescript
+function withLogging<T extends CoreTool>(tool: T, name: string): T {
+  const originalExecute = tool.execute;
+  
+  return {
+    ...tool,
+    execute: async (params, options) => {
+      console.log(`[${name}] Executing with:`, params);
+      const start = Date.now();
+      try {
+        const result = await originalExecute(params, options);
+        console.log(`[${name}] Completed in ${Date.now() - start}ms`);
+        return result;
+      } catch (error) {
+        console.error(`[${name}] Failed:`, error);
+        throw error;
+      }
+    },
+  };
+}
+
+const loggedSearch = withLogging(searchTool, 'search');
+```
+
+### Combining Tools
+
+Create composite tools:
+
+```typescript
+const weatherAndNewsTool = tool({
+  description: 'Get weather and local news for a location',
+  parameters: z.object({ location: z.string() }),
+  execute: async ({ location }) => {
+    const [weather, news] = await Promise.all([
+      weatherTool.execute({ location }),
+      searchTool.execute({ query: `${location} news` }),
+    ]);
+    
+    return { weather, news };
+  },
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Clear Descriptions" icon="file-lines">
+    Write detailed tool and parameter descriptions
+  </Card>
+  <Card title="Validation" icon="shield-check">
+    Validate inputs before executing
+  </Card>
+  <Card title="Error Messages" icon="triangle-exclamation">
+    Return helpful error messages, not exceptions
+  </Card>
+  <Card title="Idempotency" icon="arrows-rotate">
+    Make tools safe to retry
+  </Card>
+  <Card title="Timeouts" icon="clock">
+    Set reasonable execution timeouts
+  </Card>
+  <Card title="Rate Limiting" icon="gauge-high">
+    Implement rate limiting for external APIs
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Handoffs" icon="right-left" href="/concepts/handoffs">
+    Learn about agent delegation
+  </Card>
+  <Card title="Context" icon="database" href="/concepts/context">
+    Manage state between tools
+  </Card>
+  <Card title="Toolbox Package" icon="toolbox" href="/packages/toolbox">
+    Explore pre-built tools
+  </Card>
+</CardGroup>

@@ -1,0 +1,466 @@
+---
+title: 'GitHub Connector'
+description: 'Ingest content from GitHub files, releases, and repositories'
+---
+
+# GitHub Connector
+
+The GitHub connector provides access to GitHub content including individual files, release notes, and entire repositories.
+
+## Import
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+```
+
+## GitHub File
+
+Ingest a single file from a GitHub repository:
+
+```typescript
+const connector = github.file('owner/repo/path/to/file.md');
+```
+
+### Example
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Ingest React README
+await ingest({
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+```
+
+### File Path Format
+
+Path should be: `owner/repo/path/to/file`
+
+```typescript
+// Examples
+github.file('microsoft/TypeScript/README.md')
+github.file('vercel/next.js/docs/getting-started.md')
+github.file('torvalds/linux/README')
+```
+
+### Source ID
+
+```typescript
+const connector = github.file('facebook/react/README.md');
+console.log(connector.sourceId);
+// "github:file:facebook/react/README.md"
+```
+
+## GitHub Releases
+
+Ingest release notes from a GitHub repository:
+
+```typescript
+const connector = github.release('owner/repo', options);
+```
+
+### Basic Usage
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+
+// Ingest all releases
+const connector = github.release('facebook/react');
+
+await ingest({ connector, store, embedder });
+```
+
+### Options
+
+```typescript
+interface ReleaseFetchOptions {
+  untilTag?: string;          // Stop at this tag
+  inclusive?: boolean;        // Include the untilTag release (default: true)
+  includeDrafts?: boolean;    // Include draft releases (default: false)
+  includePrerelease?: boolean; // Include prereleases (default: false)
+}
+```
+
+### Stop at Specific Release
+
+```typescript
+const connector = github.release('facebook/react', {
+  untilTag: 'v18.0.0',
+  inclusive: true, // Include v18.0.0
+});
+```
+
+### Include Drafts and Prereleases
+
+```typescript
+const connector = github.release('facebook/react', {
+  includeDrafts: true,
+  includePrerelease: true,
+});
+```
+
+### Release Document Format
+
+Each release is ingested as a document with:
+
+```
+Release: {name}
+Tag: {tag_name}
+Published at: {published_at}
+Updated at: {updated_at}
+URL: {html_url}
+Draft: {draft}
+Prerelease: {prerelease}
+
+{body}
+```
+
+### Example: Search Releases
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = github.release('facebook/react');
+
+const results = await similaritySearch(
+  'What breaking changes were introduced in v18?',
+  { connector, store, embedder }
+);
+
+console.log(results[0].content);
+```
+
+### Source ID
+
+```typescript
+const connector = github.release('facebook/react');
+console.log(connector.sourceId);
+// "github:releases:facebook/react"
+```
+
+## GitHub Repository
+
+Ingest entire repository using gitingest:
+
+```typescript
+const connector = github.repo(repoUrl, options);
+```
+
+### Basic Usage
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['**/*.md'],
+  }
+);
+
+await ingest({ connector, store, embedder });
+```
+
+### Options
+
+```typescript
+interface RepoOptions {
+  includes: string[];          // Required: glob patterns to include
+  excludes?: string[];         // Patterns to exclude
+  branch?: string;             // Branch name (default: main)
+  includeGitignored?: boolean; // Include gitignored files (default: false)
+  includeSubmodules?: boolean; // Include submodules (default: false)
+  githubToken?: string;        // GitHub token for private repos
+  ingestWhen?: 'never' | 'contentChanged';
+}
+```
+
+### Include Patterns
+
+Specify files to include:
+
+```typescript
+const connector = github.repo(
+  'https://github.com/facebook/react',
+  {
+    includes: [
+      '**/*.md',      // All markdown files
+      '**/*.tsx',     // All TSX files
+      'README.md',    // Specific file
+    ],
+  }
+);
+```
+
+### Exclude Patterns
+
+Custom exclusions (default excludes common directories):
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['**/*.ts'],
+    excludes: [
+      '**/test/**',
+      '**/__tests__/**',
+      '**/examples/**',
+    ],
+  }
+);
+```
+
+### Default Excludes
+
+By default, these are excluded:
+- `**/node_modules/**`
+- `**/dist/**`
+- `**/coverage/**`
+- `**/*.test.ts` and `**/*.test.tsx`
+- `**/.git/**`
+- `**/.github/**`
+- `**/.vscode/**`
+- `**/build/**`
+- `**/__tests__/**`
+- `**/*.d.ts`
+
+### Specify Branch
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['**/*.md'],
+    branch: 'canary',
+  }
+);
+```
+
+### Private Repositories
+
+Use GitHub token for private repos:
+
+```typescript
+const connector = github.repo(
+  'https://github.com/myorg/private-repo',
+  {
+    includes: ['**/*.md'],
+    githubToken: process.env.GITHUB_TOKEN,
+  }
+);
+```
+
+### Repository URL Formats
+
+Supported URL formats:
+
+```typescript
+// Full repository
+github.repo('https://github.com/owner/repo', options)
+
+// Specific branch
+github.repo('https://github.com/owner/repo/tree/branch', options)
+
+// Subdirectory
+github.repo('https://github.com/owner/repo/tree/main/subdir', options)
+```
+
+### Ingestion Strategy
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['**/*.md'],
+    ingestWhen: 'contentChanged', // Re-ingest on changes
+  }
+);
+```
+
+### Source ID
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  { includes: ['**/*.md'] }
+);
+console.log(connector.sourceId);
+// "github:repo:https://github.com/vercel/next.js"
+```
+
+### How It Works
+
+The repository connector:
+1. Uses `gitingest` via `uvx` to generate a markdown digest
+2. Applies include/exclude patterns
+3. Respects gitignore files (unless `includeGitignored: true`)
+4. Creates a single document containing the repository content
+
+## Implementation Details
+
+### File Fetching
+
+Files are fetched via GitHub API:
+
+```typescript
+const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+const response = await fetch(url);
+const data = await response.json();
+const content = atob(data.content); // Base64 decode
+```
+
+### Release Pagination
+
+Releases are paginated (100 per page, max 10 pages):
+
+```typescript
+const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=100&page=${page}`;
+```
+
+### Repository Processing
+
+Repositories use gitingest:
+
+```bash
+uvx gitingest \
+  -b branch \
+  -i "pattern" \
+  -e "exclude" \
+  https://github.com/owner/repo \
+  -o -
+```
+
+## Examples
+
+### Ingest Multiple Files
+
+```typescript
+const files = [
+  github.file('facebook/react/README.md'),
+  github.file('facebook/react/CHANGELOG.md'),
+  github.file('facebook/react/CONTRIBUTING.md'),
+];
+
+for (const connector of files) {
+  await ingest({ connector, store, embedder });
+}
+```
+
+### Search Across Releases
+
+```typescript
+const connector = github.release('vercel/next.js');
+
+await ingest({ connector, store, embedder });
+
+const results = await similaritySearch(
+  'What changed in the latest release?',
+  { connector, store, embedder }
+);
+```
+
+### Ingest Documentation
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['docs/**/*.md', 'README.md'],
+    branch: 'canary',
+  }
+);
+
+await ingest({ connector, store, embedder });
+```
+
+## Rate Limiting
+
+GitHub API has rate limits:
+
+- **Unauthenticated**: 60 requests/hour
+- **Authenticated**: 5,000 requests/hour
+
+Use a GitHub token for higher limits:
+
+```typescript
+const connector = github.repo(url, {
+  includes: ['**/*.md'],
+  githubToken: process.env.GITHUB_TOKEN,
+});
+```
+
+## Error Handling
+
+```typescript
+try {
+  await ingest({
+    connector: github.file('owner/repo/file.md'),
+    store,
+    embedder,
+  });
+} catch (error) {
+  if (error.message.includes('404')) {
+    console.error('File not found');
+  } else if (error.message.includes('rate limit')) {
+    console.error('Rate limited, try again later');
+  }
+}
+```
+
+## Best Practices
+
+**Use Specific Include Patterns**
+
+For repositories, be specific about what to include:
+
+```typescript
+includes: ['docs/**/*.md', 'README.md']
+```
+
+**Cache Repository Content**
+
+Use `ingestWhen: 'never'` to avoid re-ingesting large repos:
+
+```typescript
+const connector = github.repo(url, {
+  includes: ['**/*.md'],
+  ingestWhen: 'never',
+});
+```
+
+**Authenticate for Private Repos**
+
+Always use a GitHub token for private repositories.
+
+**Filter Releases**
+
+Use `untilTag` to limit release ingestion:
+
+```typescript
+github.release('owner/repo', {
+  untilTag: 'v1.0.0',
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="RSS Connector" icon="rss" href="/retrieval/connectors/rss">
+    Ingest RSS feeds
+  </Card>
+  <Card title="Local Files" icon="folder" href="/retrieval/connectors/files">
+    Work with local files
+  </Card>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn about ingestion
+  </Card>
+</CardGroup>

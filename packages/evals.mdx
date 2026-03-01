@@ -1,0 +1,493 @@
+---
+title: '@deepagents/evals'
+description: 'LLM evaluation framework with scoring, persistence, and comparison'
+---
+
+## Overview
+
+The `@deepagents/evals` package provides a comprehensive evaluation framework for LLM systems. It includes dataset loading, deterministic and LLM-based scorers, run persistence, model comparison, and multiple output formats.
+
+## Installation
+
+```bash
+npm install @deepagents/evals
+```
+
+## Quick Example
+
+```typescript
+import { dataset, evaluate, exactMatch } from '@deepagents/evals';
+import { agent, generate } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const mathAgent = agent({
+  name: 'math',
+  model: openai('gpt-4o'),
+  prompt: 'Solve math problems. Return only the numeric answer.',
+});
+
+const summary = await evaluate({
+  name: 'math-accuracy',
+  model: 'gpt-4o',
+  dataset: dataset([
+    { input: 'What is 2+2?', expected: '4' },
+    { input: 'What is 10*5?', expected: '50' },
+    { input: 'What is 100/4?', expected: '25' },
+  ]),
+  task: async (item) => {
+    const result = await generate(mathAgent, item.input, {});
+    return { output: (await result.text).trim() };
+  },
+  scorers: { exact: exactMatch },
+});
+
+console.log('Accuracy:', summary.scorerMeans.exact); // 1.0
+console.log('Pass rate:', summary.passRate);         // 1.0
+```
+
+## Core API
+
+### `evaluate(config)`
+
+Run evaluation with dataset and scorers:
+
+```typescript
+interface EvaluateOptions {
+  name: string;                    // Eval name
+  model: string;                   // Model identifier
+  dataset: Dataset;                // Test cases
+  task: TaskFn;                    // Function to test
+  scorers: Record<string, Scorer>; // Scoring functions
+  maxConcurrency?: number;         // Parallel executions
+  timeout?: number;                // Per-case timeout (ms)
+  threshold?: number;              // Pass threshold (0-1)
+  store?: RunStore;                // Persistence
+}
+
+const summary = await evaluate({
+  name: 'my-eval',
+  model: 'gpt-4o',
+  dataset: myDataset,
+  task: myTask,
+  scorers: { accuracy: exactMatch },
+  maxConcurrency: 10,
+  threshold: 0.8,
+});
+```
+
+**Returns:**
+
+```typescript
+interface RunSummary {
+  runId: string;
+  totalCases: number;
+  scorerMeans: Record<string, number>;
+  passRate: number;
+  avgLatencyMs: number;
+  errors: number;
+}
+```
+
+## Datasets
+
+### `dataset(source)`
+
+Load data from various sources:
+
+<Tabs>
+  <Tab title="Inline Array">
+    ```typescript
+    import { dataset } from '@deepagents/evals';
+
+    const ds = dataset([
+      { input: 'hello', expected: 'world' },
+      { input: 'foo', expected: 'bar' },
+    ]);
+    ```
+  </Tab>
+  <Tab title="JSON File">
+    ```typescript
+    const ds = dataset('./data/questions.json');
+    ```
+  </Tab>
+  <Tab title="JSONL File">
+    ```typescript
+    const ds = dataset('./data/questions.jsonl');
+    ```
+  </Tab>
+  <Tab title="CSV File">
+    ```typescript
+    const ds = dataset('./data/questions.csv');
+    ```
+  </Tab>
+</Tabs>
+
+### Dataset Transforms
+
+Chainable, lazy transformations:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .filter((row) => row.difficulty === 'hard')
+  .map((row) => ({
+    input: row.question,
+    expected: row.answer,
+  }))
+  .shuffle()
+  .limit(100);
+```
+
+**Available Transforms:**
+
+| Transform | Type | Description |
+|-----------|------|-------------|
+| `map(fn)` | Lazy | Transform each element |
+| `filter(fn)` | Lazy | Exclude non-matching |
+| `limit(n)` | Lazy | Cap at n elements |
+| `shuffle()` | Eager | Randomize order |
+| `sample(n)` | Eager | Pick n random |
+| `toArray()` | - | Consume to array |
+
+## Scorers
+
+### Deterministic Scorers
+
+<Tabs>
+  <Tab title="exactMatch">
+    ```typescript
+    import { exactMatch } from '@deepagents/evals/scorers';
+
+    const scorer = exactMatch;
+    // Strict string equality
+    ```
+  </Tab>
+  <Tab title="includes">
+    ```typescript
+    import { includes } from '@deepagents/evals/scorers';
+
+    const scorer = includes;
+    // Substring check
+    ```
+  </Tab>
+  <Tab title="regex">
+    ```typescript
+    import { regex } from '@deepagents/evals/scorers';
+
+    const scorer = regex(/^\d{3}-\d{4}$/);
+    // Pattern matching
+    ```
+  </Tab>
+  <Tab title="levenshtein">
+    ```typescript
+    import { levenshtein } from '@deepagents/evals/scorers';
+
+    const scorer = levenshtein;
+    // Edit distance similarity
+    ```
+  </Tab>
+  <Tab title="jsonMatch">
+    ```typescript
+    import { jsonMatch } from '@deepagents/evals/scorers';
+
+    const scorer = jsonMatch;
+    // Deep JSON equality
+    ```
+  </Tab>
+</Tabs>
+
+### LLM-Based Scorers
+
+```typescript
+import { factuality } from '@deepagents/evals/scorers';
+
+const scorer = factuality({
+  model: 'gpt-4o-mini', // OpenAI-compatible model
+});
+
+const summary = await evaluate({
+  // ...
+  scorers: {
+    exact: exactMatch,
+    factual: scorer,
+  },
+});
+```
+
+<Warning>
+`factuality` uses the `autoevals` library and requires an OpenAI-compatible model.
+</Warning>
+
+### Scorer Combinators
+
+#### `all()` - Minimum Score
+
+```typescript
+import { all, exactMatch, includes } from '@deepagents/evals/scorers';
+
+const strict = all(exactMatch, includes);
+// Returns lowest score from all scorers
+```
+
+#### `any()` - Maximum Score
+
+```typescript
+import { any, exactMatch, includes } from '@deepagents/evals/scorers';
+
+const lenient = any(exactMatch, includes);
+// Returns highest score from all scorers
+```
+
+#### `weighted()` - Weighted Average
+
+```typescript
+import { weighted, exactMatch, factuality } from '@deepagents/evals/scorers';
+
+const balanced = weighted({
+  accuracy: { scorer: exactMatch, weight: 2 },
+  grounding: { scorer: factuality({ model: 'gpt-4o-mini' }), weight: 1 },
+});
+```
+
+### Custom Scorers
+
+Create your own:
+
+```typescript
+import type { Scorer } from '@deepagents/evals';
+
+const customScorer: Scorer = async ({ output, expected }) => {
+  const score = computeSimilarity(output, expected);
+  return {
+    score: score, // 0-1
+    reason: `Similarity: ${score.toFixed(2)}`,
+  };
+};
+
+const summary = await evaluate({
+  // ...
+  scorers: { custom: customScorer },
+});
+```
+
+## Run Store
+
+Persist evaluation runs to SQLite:
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+// Create suite for grouping
+const suite = store.createSuite('text2sql-accuracy');
+
+// Run evaluation
+const summary = await evaluate({
+  // ...
+  store,
+});
+
+// Query results
+const runs = store.listRuns(suite.id);
+const failing = store.getFailingCases(summary.runId, 0.5);
+const runSummary = store.getRunSummary(summary.runId);
+
+// Close
+store.close();
+```
+
+**Storage Schema:**
+- `suites` - Evaluation suites
+- `runs` - Individual runs
+- `cases` - Test cases
+- `scores` - Scoring results
+
+## Engine
+
+Low-level evaluation engine:
+
+```typescript
+import { EvalEmitter, runEval } from '@deepagents/evals/engine';
+
+const emitter = new EvalEmitter();
+
+emitter.on('run:start', (data) => console.log('Started:', data.name));
+emitter.on('case:scored', (data) => console.log('Case', data.index, ':', data.scores));
+emitter.on('run:end', (data) => console.log('Completed:', data.summary));
+
+const summary = await runEval({
+  name: 'my-eval',
+  model: 'gpt-4o',
+  dataset: myDataset,
+  task: myTask,
+  scorers: { exact: exactMatch },
+  emitter,
+  store,
+  maxConcurrency: 10,
+  timeout: 30_000,
+});
+```
+
+**Events:**
+
+| Event | Payload | When |
+|-------|---------|------|
+| `run:start` | `{ runId, totalCases, name, model }` | Run begins |
+| `case:start` | `{ runId, index, input }` | Case starts |
+| `case:scored` | `{ runId, index, scores, latencyMs }` | Case scored |
+| `case:error` | `{ runId, index, error }` | Task error |
+| `run:end` | `{ runId, summary }` | Run completes |
+
+## Comparison
+
+Compare two evaluation runs:
+
+```typescript
+import { compareRuns } from '@deepagents/evals/comparison';
+
+const result = compareRuns(
+  store,
+  baselineRunId,
+  candidateRunId,
+  {
+    tolerance: 0.01,         // Ignore changes < 1%
+    regressionThreshold: 0.05, // Flag drops > 5%
+  }
+);
+
+console.log('Regressed:', result.regression.regressed);
+console.log('Scorer deltas:', result.scorerSummaries);
+console.log('Latency delta:', result.costDelta.avgLatencyMs);
+```
+
+**Returns:**
+
+```typescript
+interface ComparisonResult {
+  regression: {
+    regressed: boolean;
+    regressedScorers: string[];
+  };
+  scorerSummaries: Record<string, ScorerSummary>;
+  costDelta: {
+    avgLatencyMs: number;
+  };
+  caseDiffs: CaseDiff[];
+}
+```
+
+## Reporters
+
+Output results in various formats.
+
+### Console Reporter
+
+```typescript
+import { consoleReporter } from '@deepagents/evals/reporters';
+
+const emitter = new EvalEmitter();
+consoleReporter(emitter, {
+  verbosity: 'normal', // 'quiet' | 'normal' | 'verbose'
+  threshold: 0.5,
+});
+
+const summary = await runEval({ /* ... */, emitter });
+```
+
+### File Reporters
+
+<Tabs>
+  <Tab title="JSON">
+    ```typescript
+    import { jsonReporter } from '@deepagents/evals/reporters';
+
+    jsonReporter(emitter, './results.json');
+    ```
+  </Tab>
+  <Tab title="CSV">
+    ```typescript
+    import { csvReporter } from '@deepagents/evals/reporters';
+
+    csvReporter(emitter, './results.csv');
+    ```
+  </Tab>
+  <Tab title="Markdown">
+    ```typescript
+    import { markdownReporter } from '@deepagents/evals/reporters';
+
+    markdownReporter(emitter, './results.md');
+    ```
+  </Tab>
+  <Tab title="HTML">
+    ```typescript
+    import { htmlReporter } from '@deepagents/evals/reporters';
+
+    htmlReporter(emitter, './results.html');
+    ```
+  </Tab>
+</Tabs>
+
+## Complete Example
+
+```typescript
+import { dataset, evaluate, exactMatch, levenshtein, weighted } from '@deepagents/evals';
+import { RunStore } from '@deepagents/evals/store';
+import { agent, generate } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+// Setup
+const store = new RunStore('.evals/runs.db');
+const suite = store.createSuite('summarization');
+
+const summarizer = agent({
+  name: 'summarizer',
+  model: openai('gpt-4o'),
+  prompt: 'Summarize text concisely.',
+});
+
+// Run evaluation
+const summary = await evaluate({
+  name: 'summarization-quality',
+  model: 'gpt-4o',
+  dataset: dataset('./data/summaries.jsonl')
+    .filter(r => r.length < 1000)
+    .limit(50),
+  task: async (item) => {
+    const result = await generate(summarizer, item.input, {});
+    return { output: await result.text };
+  },
+  scorers: {
+    similarity: weighted({
+      exact: { scorer: exactMatch, weight: 1 },
+      fuzzy: { scorer: levenshtein, weight: 2 },
+    }),
+  },
+  maxConcurrency: 5,
+  timeout: 10_000,
+  threshold: 0.7,
+  store,
+});
+
+console.log('Pass rate:', summary.passRate);
+console.log('Avg latency:', summary.avgLatencyMs, 'ms');
+
+store.close();
+```
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/evals](https://www.npmjs.com/package/@deepagents/evals)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Evaluate agent performance
+  </Card>
+  <Card title="@deepagents/text2sql" icon="database" href="/packages/text2sql">
+    Evaluate SQL accuracy
+  </Card>
+</CardGroup>

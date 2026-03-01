@@ -1,0 +1,150 @@
+---
+title: 'Introduction to Context Management'
+description: 'A domain-agnostic context management system for formatting context fragments into different prompt styles'
+---
+
+## Overview
+
+`@deepagents/context` is a domain-agnostic context management system for formatting context fragments into different prompt styles. It provides a flexible way to compose and render context data in multiple formats (XML, Markdown, TOML, TOON) suitable for various LLM prompt styles.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-format Rendering" icon="code">
+    Render context fragments as XML, Markdown, TOML, or TOON formats to match different LLM prompt styles
+  </Card>
+  <Card title="Fragment Builders" icon="cube">
+    Rich set of builder functions for domain knowledge, user context, and messages
+  </Card>
+  <Card title="Stream Persistence" icon="database">
+    Durable stream storage with SQLite for resumable operations
+  </Card>
+  <Card title="Type-Safe" icon="shield-check">
+    Built with TypeScript for complete type safety and IntelliSense support
+  </Card>
+</CardGroup>
+
+## Core Concepts
+
+### Context Fragments
+
+Fragments are simple data structures that can be transformed into different representations. Each fragment has a `name` and associated `data`:
+
+```typescript
+interface ContextFragment {
+  name: string;
+  data: FragmentData;
+  type?: 'fragment' | 'message';
+  persist?: boolean;
+  codec?: FragmentCodec;
+}
+```
+
+### Fragment Categories
+
+Fragments are organized into three main categories:
+
+<AccordionGroup>
+  <Accordion title="Domain Fragments" icon="book">
+    Capture domain-specific knowledge that can be injected into AI prompts:
+    - **Terms**: Define business vocabulary
+    - **Hints**: Behavioral rules and constraints
+    - **Guardrails**: Safety rules and boundaries
+    - **Examples**: Question-answer pairs
+    - **Workflows**: Multi-step processes
+  </Accordion>
+  
+  <Accordion title="User Fragments" icon="user">
+    Capture user-specific context and preferences:
+    - **Identity**: User name and role
+    - **Persona**: AI assistant identity
+    - **Aliases**: User-specific vocabulary
+    - **Preferences**: Output formatting preferences
+    - **Corrections**: Fixes to previous misunderstandings
+  </Accordion>
+  
+  <Accordion title="Message Fragments" icon="message">
+    Represent conversation messages:
+    - **User messages**: With optional system reminders
+    - **Assistant messages**: AI responses
+    - **Reminders**: Hidden instructions attached to messages
+  </Accordion>
+</AccordionGroup>
+
+### Renderers
+
+Renderers transform fragments into different output formats:
+
+- **XmlRenderer**: Hierarchical XML with proper nesting and escaping
+- **MarkdownRenderer**: Human-readable markdown with bullet points
+- **TomlRenderer**: TOML-like configuration format
+- **ToonRenderer**: Token-efficient format with CSV-style tables
+
+## Quick Example
+
+```typescript
+import { XmlRenderer, term, hint, guardrail } from '@deepagents/context';
+
+const fragments = [
+  term('MRR', 'monthly recurring revenue'),
+  hint('Always exclude test accounts'),
+  guardrail({
+    rule: 'Never expose PII',
+    reason: 'Privacy compliance',
+    action: 'Aggregate data instead',
+  }),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+
+```xml
+<terms>
+  <term>
+    <name>MRR</name>
+    <definition>monthly recurring revenue</definition>
+  </term>
+</terms>
+<hints>
+  <hint>Always exclude test accounts</hint>
+</hints>
+<guardrails>
+  <guardrail>
+    <rule>Never expose PII</rule>
+    <reason>Privacy compliance</reason>
+    <action>Aggregate data instead</action>
+  </guardrail>
+</guardrails>
+```
+
+## Browser Support
+
+For browser bundles, use the browser-specific export path that excludes server-only modules:
+
+```typescript
+import { identity, reminder, term, user } from '@deepagents/context/browser';
+```
+
+<Note>
+The browser entry point excludes server-only modules like store implementations, sandbox tooling, and filesystem-based skill loading.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/context/installation">
+    Get started by installing the package
+  </Card>
+  <Card title="Fragment Builders" icon="cube" href="/context/fragments">
+    Learn about creating and composing fragments
+  </Card>
+  <Card title="Renderers" icon="code" href="/context/renderers">
+    Explore different output formats
+  </Card>
+  <Card title="API Reference" icon="book" href="/context/api/fragment-builders">
+    Complete API documentation
+  </Card>
+</CardGroup>

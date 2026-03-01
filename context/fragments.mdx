@@ -1,0 +1,316 @@
+---
+title: 'Creating and Composing Fragments'
+description: 'Learn how to create and compose context fragments for AI prompts'
+---
+
+## What are Fragments?
+
+Fragments are the building blocks of context management. Each fragment is a simple data structure with a `name` and associated `data` that can be transformed into different prompt formats.
+
+```typescript
+interface ContextFragment {
+  name: string;              // Fragment identifier
+  data: FragmentData;        // Content (primitive, object, array, or nested fragment)
+  type?: 'fragment' | 'message';  // Category
+  persist?: boolean;         // Whether to persist to storage
+  codec?: FragmentCodec;     // Custom encoding/decoding
+}
+```
+
+## Basic Fragment Creation
+
+Fragments are created using builder functions that return `ContextFragment` objects:
+
+```typescript
+import { term, hint, guardrail } from '@deepagents/context';
+
+// Simple term definition
+const fragment1 = term('API', 'Application Programming Interface');
+
+// Behavioral hint
+const fragment2 = hint('Always validate input before processing');
+
+// Safety guardrail
+const fragment3 = guardrail({
+  rule: 'Never expose sensitive data',
+  reason: 'Security compliance',
+  action: 'Redact or aggregate instead',
+});
+```
+
+## Fragment Data Types
+
+Fragments can contain various data types:
+
+<Tabs>
+  <Tab title="Primitives">
+    ```typescript
+    // String data
+    const hint1 = hint('Use UTC timestamps');
+    
+    // Fragments with primitive values
+    const role1 = { name: 'role', data: 'You are a helpful assistant' };
+    ```
+  </Tab>
+  
+  <Tab title="Objects">
+    ```typescript
+    // Object with multiple fields
+    const example1 = example({
+      question: 'What is the total revenue?',
+      answer: 'SELECT SUM(amount) FROM orders',
+      note: 'Exclude test accounts',
+    });
+    
+    // Results in:
+    // {
+    //   name: 'example',
+    //   data: { question: '...', answer: '...', note: '...' }
+    // }
+    ```
+  </Tab>
+  
+  <Tab title="Arrays">
+    ```typescript
+    // Array of steps
+    const workflow1 = workflow({
+      task: 'Data Analysis',
+      steps: [
+        'Load data from source',
+        'Clean and validate',
+        'Perform analysis',
+        'Generate report',
+      ],
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Nested Fragments">
+    ```typescript
+    import { fragment } from '@deepagents/context';
+    
+    // Wrap multiple fragments
+    const instructions = fragment(
+      'instructions',
+      term('MRR', 'monthly recurring revenue'),
+      hint('Always use CTEs for complex queries'),
+      guardrail({ rule: 'No data older than 90 days' }),
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## Composing Fragments
+
+### Array Composition
+
+The simplest way to compose fragments is using arrays:
+
+```typescript
+import { XmlRenderer, term, hint, example } from '@deepagents/context';
+
+const fragments = [
+  term('CAC', 'customer acquisition cost'),
+  term('LTV', 'lifetime value'),
+  hint('Calculate CAC = total_marketing_spend / new_customers'),
+  hint('Calculate LTV = avg_revenue_per_user * avg_customer_lifetime'),
+  example({
+    question: 'What is our LTV:CAC ratio?',
+    answer: 'SELECT (LTV / CAC) as ltv_cac_ratio FROM metrics',
+  }),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+### Using the Fragment Wrapper
+
+Create a parent fragment that contains child fragments:
+
+```typescript
+import { fragment, term, hint } from '@deepagents/context';
+
+const domainKnowledge = fragment(
+  'domain-knowledge',
+  term('NPL', 'non-performing loan'),
+  term('DTI', 'debt-to-income ratio'),
+  hint('Loans past due 90+ days are classified as NPL'),
+);
+
+// Renders as:
+// <domain-knowledge>
+//   <term>...</term>
+//   <term>...</term>
+//   <hint>...</hint>
+// </domain-knowledge>
+```
+
+### Grouping Same-Type Fragments
+
+When using `groupFragments: true`, the renderer automatically groups fragments with the same name:
+
+```typescript
+import { XmlRenderer, term } from '@deepagents/context';
+
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  term('SDK', 'Software Development Kit'),
+  term('CLI', 'Command Line Interface'),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+**Output:**
+
+```xml
+<terms>
+  <term>
+    <name>API</name>
+    <definition>Application Programming Interface</definition>
+  </term>
+  <term>
+    <name>SDK</name>
+    <definition>Software Development Kit</definition>
+  </term>
+  <term>
+    <name>CLI</name>
+    <definition>Command Line Interface</definition>
+  </term>
+</terms>
+```
+
+<Note>
+The group name is automatically pluralized (e.g., `term` becomes `terms`).
+</Note>
+
+## Null and Undefined Handling
+
+All renderers automatically skip `null` and `undefined` values:
+
+```typescript
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  guardrail({
+    rule: 'No PII',
+    reason: undefined,  // This field will be omitted
+    action: null,       // This field will be omitted
+  }),
+];
+
+// Only non-null fields are rendered
+```
+
+## Fragment Type Checking
+
+Use type guards to check fragment types:
+
+```typescript
+import { isFragment, isFragmentObject } from '@deepagents/context';
+
+const data: unknown = { name: 'term', data: { name: 'API', definition: '...' } };
+
+if (isFragment(data)) {
+  console.log(`Fragment: ${data.name}`);
+}
+
+if (isFragmentObject(data.data)) {
+  console.log('Data is a plain object');
+}
+```
+
+## Custom Fragments
+
+Create custom fragments for specialized use cases:
+
+```typescript
+import type { ContextFragment } from '@deepagents/context';
+
+// Custom fragment builder
+function metric(name: string, query: string, unit?: string): ContextFragment {
+  return {
+    name: 'metric',
+    data: {
+      name,
+      query,
+      ...(unit && { unit }),
+    },
+  };
+}
+
+// Usage
+const revenue = metric('Total Revenue', 'SELECT SUM(amount) FROM orders', 'USD');
+const count = metric('User Count', 'SELECT COUNT(*) FROM users');
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep Fragments Focused">
+    Each fragment should represent a single concept or piece of information. Avoid cramming multiple unrelated pieces of data into one fragment.
+    
+    ```typescript
+    // Good: Focused fragments
+    term('MRR', 'monthly recurring revenue')
+    hint('Exclude test accounts')
+    
+    // Avoid: Mixed concepts
+    { name: 'rules', data: 'MRR means monthly recurring revenue. Exclude test accounts.' }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Appropriate Fragment Types">
+    Choose the right fragment builder for your use case:
+    - Use `term()` for vocabulary
+    - Use `hint()` for behavioral rules
+    - Use `guardrail()` for safety rules
+    - Use `example()` for few-shot learning
+    
+    This makes your intent clear and enables better rendering.
+  </Accordion>
+  
+  <Accordion title="Leverage Grouping">
+    When you have multiple fragments of the same type, use `groupFragments: true` in the renderer to automatically organize them:
+    
+    ```typescript
+    const renderer = new XmlRenderer({ groupFragments: true });
+    ```
+  </Accordion>
+  
+  <Accordion title="Avoid Deep Nesting">
+    While fragments support arbitrary nesting, keep the hierarchy shallow for better readability:
+    
+    ```typescript
+    // Good: Flat structure
+    const fragments = [term1, term2, hint1, hint2];
+    
+    // Avoid: Deep nesting
+    const fragments = [
+      fragment('level1',
+        fragment('level2',
+          fragment('level3', term1)
+        )
+      )
+    ];
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Learn about domain fragment types
+  </Card>
+  <Card title="User Context" icon="user" href="/context/user-context">
+    Add user-specific context
+  </Card>
+  <Card title="Renderers" icon="code" href="/context/renderers">
+    Transform fragments into different formats
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/context/api/fragment-builders">
+    Complete fragment builder API
+  </Card>
+</CardGroup>

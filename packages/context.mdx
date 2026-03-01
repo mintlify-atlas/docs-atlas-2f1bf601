@@ -1,0 +1,496 @@
+---
+title: '@deepagents/context'
+description: 'Context management with multi-format rendering for LLM prompts'
+---
+
+## Overview
+
+The `@deepagents/context` package provides a domain-agnostic context management system for formatting context fragments into different prompt styles (XML, Markdown, TOML). It includes fragment builders, renderers, persistence stores, and stream management.
+
+## Installation
+
+```bash
+npm install @deepagents/context
+```
+
+**Browser Usage:**
+```typescript
+import { term, hint, XmlRenderer } from '@deepagents/context/browser';
+```
+
+<Note>
+The `/browser` export excludes server-only modules like store implementations and filesystem-based skill loading.
+</Note>
+
+## Quick Example
+
+```typescript
+import { XmlRenderer, term, hint, guardrail } from '@deepagents/context';
+
+const fragments = [
+  term('MRR', 'monthly recurring revenue'),
+  hint('Always exclude test accounts'),
+  guardrail({
+    rule: 'Never expose PII',
+    reason: 'Privacy compliance',
+    action: 'Aggregate data instead',
+  }),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+const xml = renderer.render(fragments);
+
+console.log(xml);
+// <terms>
+//   <term>
+//     <name>MRR</name>
+//     <definition>monthly recurring revenue</definition>
+//   </term>
+// </terms>
+// <hints>
+//   <hint>Always exclude test accounts</hint>
+// </hints>
+// <guardrails>...
+```
+
+## Fragment Builders
+
+### Domain Fragments
+
+Inject domain knowledge into prompts:
+
+<Tabs>
+  <Tab title="term">
+    ```typescript
+    import { term } from '@deepagents/context';
+
+    const fragment = term('NPL', 'non-performing loan');
+    ```
+    Define business vocabulary and abbreviations.
+  </Tab>
+  <Tab title="hint">
+    ```typescript
+    import { hint } from '@deepagents/context';
+
+    const fragment = hint('Always filter by active status');
+    ```
+    Behavioral rules and constraints.
+  </Tab>
+  <Tab title="guardrail">
+    ```typescript
+    import { guardrail } from '@deepagents/context';
+
+    const fragment = guardrail({
+      rule: 'No PII in responses',
+      reason: 'Privacy compliance',
+      action: 'Aggregate data instead',
+    });
+    ```
+    Safety rules and boundaries.
+  </Tab>
+  <Tab title="example">
+    ```typescript
+    import { example } from '@deepagents/context';
+
+    const fragment = example({
+      question: 'Show top customers',
+      answer: 'SELECT * FROM customers ORDER BY revenue DESC LIMIT 10',
+      note: 'Always use revenue for ranking',
+    });
+    ```
+    Question-answer pairs for few-shot learning.
+  </Tab>
+</Tabs>
+
+### User Fragments
+
+User-specific context:
+
+<Tabs>
+  <Tab title="identity">
+    ```typescript
+    import { identity } from '@deepagents/context';
+
+    const fragment = identity({
+      name: 'John Doe',
+      role: 'VP Sales',
+    });
+    ```
+  </Tab>
+  <Tab title="preference">
+    ```typescript
+    import { preference } from '@deepagents/context';
+
+    const fragment = preference('date format', 'YYYY-MM-DD');
+    ```
+  </Tab>
+  <Tab title="alias">
+    ```typescript
+    import { alias } from '@deepagents/context';
+
+    const fragment = alias('revenue', 'gross revenue excluding refunds');
+    ```
+  </Tab>
+</Tabs>
+
+### Message Fragments
+
+```typescript
+import { user, assistant, reminder } from '@deepagents/context';
+
+// User message with reminder
+const msg = user(
+  'Ship the new feature',
+  reminder('Confirm deployment before proceeding')
+);
+
+// Assistant message
+const response = assistantText('Done!', { id: 'resp-1' });
+```
+
+### Complete Fragment List
+
+| Function | Description |
+|----------|-------------|
+| `term(name, definition)` | Business vocabulary |
+| `hint(text)` | Behavioral rules |
+| `guardrail({rule, reason?, action?})` | Safety boundaries |
+| `explain({concept, explanation, therefore?})` | Concept explanations |
+| `example({question, answer, note?})` | Q&A pairs |
+| `clarification({when, ask, reason})` | When to ask for info |
+| `workflow({task, steps, triggers?, notes?})` | Multi-step processes |
+| `quirk({issue, workaround})` | Data edge cases |
+| `styleGuide({prefer, never?, always?})` | Style preferences |
+| `analogy({concepts, relationship, ...})` | Concept comparisons |
+| `glossary(entries)` | Term-to-expression map |
+| `identity({name?, role?})` | User identity |
+| `persona({name, role, tone?})` | AI persona |
+| `alias(term, meaning)` | User vocabulary |
+| `preference(aspect, value)` | Output preferences |
+| `userContext(description)` | Current focus |
+| `correction(subject, clarification)` | Corrections |
+
+## Renderers
+
+### XmlRenderer
+
+Renders fragments as XML:
+
+```typescript
+import { XmlRenderer } from '@deepagents/context';
+
+const renderer = new XmlRenderer({ groupFragments: true });
+const xml = renderer.render(fragments);
+```
+
+**Options:**
+- `groupFragments: boolean` - Group same-named fragments under pluralized parent
+
+**Output:**
+```xml
+<styleGuide>
+  <prefer>CTEs</prefer>
+  <never>subqueries</never>
+</styleGuide>
+```
+
+### MarkdownRenderer
+
+Renders as Markdown:
+
+```typescript
+import { MarkdownRenderer } from '@deepagents/context';
+
+const renderer = new MarkdownRenderer();
+const md = renderer.render(fragments);
+```
+
+**Output:**
+```markdown
+## Style Guide
+
+- **prefer**: CTEs
+- **never**: subqueries
+```
+
+### TomlRenderer
+
+Renders as TOML-like format:
+
+```typescript
+import { TomlRenderer } from '@deepagents/context';
+
+const renderer = new TomlRenderer();
+const toml = renderer.render(fragments);
+```
+
+**Output:**
+```toml
+[styleGuide]
+prefer = "CTEs"
+never = "subqueries"
+```
+
+### ToonRenderer
+
+Token-efficient format:
+
+```typescript
+import { ToonRenderer } from '@deepagents/context';
+
+const renderer = new ToonRenderer();
+const toon = renderer.render(fragments);
+```
+
+**Output:**
+```yaml
+styleGuide:
+  prefer: CTEs
+  never: subqueries
+```
+
+## Context Stores
+
+Persist context across sessions.
+
+### InMemoryContextStore
+
+```typescript
+import { InMemoryContextStore } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+
+// Save
+await store.save('session123', {
+  userId: 'user123',
+  data: {...},
+});
+
+// Load
+const context = await store.load('session123');
+
+// Delete
+await store.delete('session123');
+```
+
+### SqliteContextStore
+
+Persistent SQLite storage:
+
+```typescript
+import { SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./context.db');
+
+await store.save('session123', context);
+const loaded = await store.load('session123');
+
+store.close();
+```
+
+### PostgresContextStore
+
+```typescript
+import { PostgresContextStore } from '@deepagents/context';
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const store = new PostgresContextStore(pool);
+await store.save('session123', context);
+```
+
+## Stream Persistence
+
+Durable stream storage for long-running operations.
+
+### SqliteStreamStore
+
+```typescript
+import { SqliteStreamStore, StreamManager } from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+const manager = new StreamManager({
+  store,
+  watchPolling: {
+    minMs: 25,
+    maxMs: 500,
+    multiplier: 2,
+  },
+});
+
+// Use with streaming operations
+// ...
+
+// Cleanup
+store.close();
+```
+
+### StreamManager
+
+Register, persist, watch, cancel, and reopen streams:
+
+```typescript
+const manager = new StreamManager({
+  store: new SqliteStreamStore('./streams.db'),
+  watchPolling: {
+    minMs: 25,
+    maxMs: 500,
+    multiplier: 2,
+    jitterRatio: 0.15,
+  },
+});
+
+// Register a stream
+const streamId = await manager.register({
+  type: 'agent-execution',
+  metadata: { userId: 'user123' },
+});
+
+// Write chunks
+await manager.write(streamId, { type: 'text', data: 'Hello' });
+
+// Watch stream
+for await (const chunk of manager.watch(streamId)) {
+  console.log(chunk);
+}
+
+// Cancel
+await manager.cancel(streamId);
+```
+
+## Token Estimation
+
+Estimate token usage:
+
+```typescript
+import { estimateTokens } from '@deepagents/context';
+
+const text = 'Your prompt text here';
+const tokens = estimateTokens(text, 'gpt-4');
+
+console.log('Estimated tokens:', tokens);
+```
+
+Supported models:
+- `gpt-4`
+- `gpt-3.5-turbo`
+- `claude-3`
+- And more via `gpt-tokenizer` library
+
+## Skills Module
+
+Anthropic-style progressive disclosure:
+
+```typescript
+import { loadSkills, renderSkills } from '@deepagents/context';
+
+const skills = await loadSkills('./skills');
+const rendered = renderSkills(skills, { format: 'xml' });
+
+// Use in agent prompt
+const prompt = `${rendered}\n\nUser query: ${userMessage}`;
+```
+
+## Advanced Usage
+
+### Custom Fragments
+
+Create your own fragment types:
+
+```typescript
+import { fragment } from '@deepagents/context';
+
+function customFragment(data: any) {
+  return fragment('customType', data);
+}
+
+const myFragment = customFragment({ key: 'value' });
+```
+
+### Fragment Composition
+
+Nest fragments:
+
+```typescript
+const parent = fragment('parent', {
+  child1: term('term1', 'definition'),
+  child2: hint('some hint'),
+  nested: {
+    deepChild: 'value',
+  },
+});
+```
+
+### Conditional Fragments
+
+```typescript
+function getFragments(userTier: string) {
+  const base = [
+    term('basic', 'basic term'),
+    hint('basic hint'),
+  ];
+  
+  if (userTier === 'pro') {
+    base.push(
+      hint('Pro users can access advanced features'),
+      example({ question: 'pro example', answer: 'pro answer' })
+    );
+  }
+  
+  return base;
+}
+```
+
+## Reminders
+
+Inline reminders in user messages:
+
+```typescript
+import { user, reminder } from '@deepagents/context';
+
+const msg = user(
+  'Complete this task',
+  reminder('Verify with user before proceeding'),
+  reminder('Log all actions', { asPart: true })
+);
+
+// Access reminder metadata
+const ranges = getReminderRanges(msg.metadata);
+const textWithoutReminders = stripReminders(msg);
+```
+
+**Reminder options:**
+- `mode: 'inline' | 'part'` - How to inject
+- `asPart: boolean` - Create separate text part
+
+## Visualization
+
+Visualize context graphs:
+
+```typescript
+import { visualizeContext } from '@deepagents/context';
+
+const graph = visualizeContext(fragments);
+console.log(graph); // ASCII representation
+```
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/context](https://www.npmjs.com/package/@deepagents/context)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Use fragments in agent prompts
+  </Card>
+  <Card title="@deepagents/text2sql" icon="database" href="/packages/text2sql">
+    Domain fragments for SQL generation
+  </Card>
+</CardGroup>

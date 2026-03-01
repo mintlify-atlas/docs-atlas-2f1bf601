@@ -1,80 +1,259 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quick start'
+description: 'Get up and running with DeepAgents in 5 minutes'
 ---
 
-## Get started in three steps
+## Your first agent
 
-Get your documentation site running locally and make your first customization.
+Build a working AI agent in just a few lines of code.
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<Steps>
+  <Step title="Install the package">
+    <CodeGroup>
+    ```bash npm
+    npm install @deepagents/agent zod
+    ```
+    ```bash pnpm
+    pnpm add @deepagents/agent zod
+    ```
+    ```bash yarn
+    yarn add @deepagents/agent zod
+    ```
+    </CodeGroup>
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    You'll also need an AI SDK provider:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    npm install @ai-sdk/openai
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+  <Step title="Set your API key">
+    Configure your OpenAI API key:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    export OPENAI_API_KEY="your-api-key"
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Create your first agent">
+    Create a simple assistant agent:
+    
+    ```typescript
+    import { openai } from '@ai-sdk/openai';
+    import { agent, execute } from '@deepagents/agent';
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    const assistant = agent({
+      name: 'assistant',
+      model: openai('gpt-4o'),
+      prompt: 'You are a helpful assistant.',
+    });
 
-### Step 3: Go live
+    const stream = execute(assistant, 'Hello! What can you help me with?', {});
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    for await (const chunk of stream.textStream) {
+      process.stdout.write(chunk);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Add tools to your agent
+
+Agents become powerful when they can use tools. Here's how to add a weather tool:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { tool } from 'ai';
+import { z } from 'zod';
+import { agent, execute } from '@deepagents/agent';
+
+const weatherTool = tool({
+  description: 'Get weather for a location',
+  parameters: z.object({
+    location: z.string(),
+  }),
+  execute: async ({ location }) => {
+    // In production, call a real weather API
+    return { temperature: 72, condition: 'sunny', location };
+  },
+});
+
+const weatherAgent = agent({
+  name: 'weather_agent',
+  model: openai('gpt-4o'),
+  prompt: 'You help users check the weather.',
+  tools: { weather: weatherTool },
+});
+
+const stream = execute(weatherAgent, 'What is the weather in Tokyo?', {});
+console.log(await stream.text);
+```
+
+The agent will automatically:
+1. Recognize it needs weather data
+2. Call the `weather` tool with the location
+3. Use the tool's response to answer the question
+
+## Create a multi-agent system
+
+Build agents that delegate to specialized agents:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, instructions, swarm } from '@deepagents/agent';
+
+// Research specialist
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'You research topics and provide detailed information.',
+  handoffDescription: 'Handles research and fact-finding tasks',
+});
+
+// Writing specialist
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'You write clear, engaging content based on research.',
+  handoffDescription: 'Handles writing and content creation',
+});
+
+// Coordinator
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions({
+    purpose: ['Coordinate research and writing tasks'],
+    routine: [
+      'Analyze the request',
+      'Use transfer_to_researcher for fact-finding',
+      'Use transfer_to_writer for content creation',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+
+// The coordinator automatically delegates to specialists
+const stream = swarm(coordinator, 'Write a blog post about AI agents', {});
+```
+
+Agents automatically get `transfer_to_<agent_name>` tools and coordinate seamlessly.
+
+## Get structured output
+
+Extract type-safe data from AI responses:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { agent, generate } from '@deepagents/agent';
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze the sentiment of the given text.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number(),
+    keywords: z.array(z.string()),
+  }),
+});
+
+const result = await generate(analyzer, 'I love this product!', {});
+console.log(result.output);
+// { sentiment: 'positive', confidence: 0.95, keywords: ['love', 'product'] }
+```
+
+## Query databases with natural language
+
+Use Text2SQL for natural language database queries:
+
+```typescript
+import { Sqlite } from '@deepagents/text2sql/sqlite';
+import { openai } from '@ai-sdk/openai';
+
+const text2sql = new Sqlite(
+  './database.db',
+  openai('gpt-4o')
+);
+
+const result = await text2sql.query(
+  'What are the top 5 customers by revenue?'
+);
+
+console.log(result.rows);
+```
+
+<Note>
+Text2SQL automatically introspects your schema, validates queries, and handles multi-turn conversations.
+</Note>
+
+## Add RAG capabilities
+
+Ingest documents and perform semantic search:
+
+```typescript
+import { ingest, similaritySearch } from '@deepagents/retrieval';
+import { GithubConnector } from '@deepagents/retrieval/connectors';
+
+// Ingest documentation
+await ingest({
+  connector: new GithubConnector({
+    owner: 'yourorg',
+    repo: 'yourrepo',
+    path: 'docs',
+  }),
+  store: './embeddings.db',
+});
+
+// Search
+const results = await similaritySearch({
+  query: 'How do I configure authentication?',
+  store: './embeddings.db',
+  topK: 5,
+});
+
+console.log(results);
+```
+
+## Evaluate your agents
+
+Test and score agent performance:
+
+```typescript
+import { evaluate, dataset, exactMatch } from '@deepagents/evals';
+
+const summary = await evaluate({
+  name: 'agent-eval',
+  model: 'gpt-4o',
+  dataset: dataset([
+    { input: 'What is 2+2?', expected: '4' },
+    { input: 'What is 3+3?', expected: '6' },
+  ]),
+  task: async (item) => {
+    const response = await callYourAgent(item.input);
+    return { output: response };
+  },
+  scorers: { exact: exactMatch },
+});
+
+console.log(summary);
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Core concepts" icon="lightbulb" href="/concepts/agents">
+    Learn about agents, tools, and handoffs
+  </Card>
+  <Card title="Agent framework" icon="robot" href="/agent/introduction">
+    Deep dive into the agent framework
+  </Card>
+  <Card title="Text2SQL" icon="database" href="/text2sql/introduction">
+    Natural language to SQL
+  </Card>
+  <Card title="RAG & retrieval" icon="magnifying-glass" href="/retrieval/introduction">
+    Document ingestion and semantic search
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

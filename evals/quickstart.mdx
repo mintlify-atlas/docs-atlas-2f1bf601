@@ -1,0 +1,268 @@
+---
+title: Quickstart
+description: Run your first evaluation in 5 minutes
+---
+
+# Quickstart
+
+This guide walks you through running your first LLM evaluation with `@deepagents/evals`.
+
+## Basic Example
+
+Here's a complete evaluation that tests a simple question-answering task:
+
+```typescript
+import { dataset, evaluate, exactMatch } from '@deepagents/evals';
+import { consoleReporter } from '@deepagents/evals/reporters';
+import { RunStore } from '@deepagents/evals/store';
+
+// Define your task function
+const task = async (item: { input: string; expected: string }) => {
+  // Call your LLM here
+  const response = await callMyLLM(item.input);
+  return { output: response };
+};
+
+// Run the evaluation
+const summary = await evaluate({
+  name: 'my-first-eval',
+  model: 'gpt-4o',
+  dataset: dataset([
+    { input: 'What is 2+2?', expected: '4' },
+    { input: 'What is 3+3?', expected: '6' },
+  ]),
+  task,
+  scorers: { exact: exactMatch },
+  reporters: [consoleReporter()],
+  store: new RunStore(),
+});
+
+console.log(summary);
+```
+
+## Step-by-Step Breakdown
+
+### 1. Import Dependencies
+
+```typescript
+import { dataset, evaluate, exactMatch } from '@deepagents/evals';
+import { consoleReporter } from '@deepagents/evals/reporters';
+import { RunStore } from '@deepagents/evals/store';
+```
+
+### 2. Create a Dataset
+
+The dataset is an array of test cases. Each case should have an `input` and an `expected` value:
+
+```typescript
+const ds = dataset([
+  { input: 'What is 2+2?', expected: '4' },
+  { input: 'What is 3+3?', expected: '6' },
+  { input: 'What is the capital of France?', expected: 'Paris' },
+]);
+```
+
+You can also load from files:
+
+```typescript
+const ds = dataset('./questions.json');
+```
+
+### 3. Define a Task Function
+
+The task function calls your LLM and returns the output:
+
+```typescript
+const task = async (item: { input: string; expected: string }) => {
+  // Example using OpenAI
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: item.input }],
+  });
+
+  return {
+    output: completion.choices[0]!.message.content!,
+    usage: {
+      inputTokens: completion.usage!.prompt_tokens,
+      outputTokens: completion.usage!.completion_tokens,
+    },
+  };
+};
+```
+
+<Note>
+The task function should return `{ output: string, usage?: { inputTokens: number, outputTokens: number } }`.
+</Note>
+
+### 4. Choose Scorers
+
+Scorers evaluate the quality of the output. Use built-in scorers or create custom ones:
+
+```typescript
+import { exactMatch, includes } from '@deepagents/evals/scorers';
+
+const scorers = {
+  exact: exactMatch,
+  contains: includes,
+};
+```
+
+See the [Scorers guide](/evals/scorers) for all available options.
+
+### 5. Set Up Reporters
+
+Reporters display evaluation results:
+
+```typescript
+import { consoleReporter } from '@deepagents/evals/reporters';
+
+const reporters = [
+  consoleReporter({ verbosity: 'normal' }),
+];
+```
+
+### 6. Create a Run Store
+
+The run store persists results to SQLite:
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+```
+
+### 7. Run the Evaluation
+
+Put it all together with `evaluate()`:
+
+```typescript
+const summary = await evaluate({
+  name: 'my-first-eval',
+  model: 'gpt-4o',
+  dataset: ds,
+  task,
+  scorers,
+  reporters,
+  store,
+});
+
+console.log(summary);
+```
+
+## Understanding the Output
+
+The console reporter displays a progress bar and summary:
+
+```
+  ── my-first-eval ──────────────────────────────────────────
+  Running 3 cases...
+
+  Summary
+  ────────────────────────────────────────────────────────────
+  Eval:      my-first-eval
+  Model:     gpt-4o
+  Threshold: 0.5
+  Cases:     3
+  Pass/Fail: 2 / 1 (66.7%)
+  Duration:  1.2s
+  Tokens:    In: 45  Out: 12  Total: 57
+
+  Scores
+    exact:      0.667
+  ────────────────────────────────────────────────────────────
+```
+
+The `summary` object contains detailed metrics:
+
+```typescript
+interface RunSummary {
+  totalCases: number;
+  passCount: number;
+  failCount: number;
+  meanScores: Record<string, number>;
+  totalLatencyMs: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+}
+```
+
+## Advanced Configuration
+
+### Concurrency
+
+Control how many cases run in parallel:
+
+```typescript
+await evaluate({
+  // ...
+  maxConcurrency: 5, // Run 5 cases at a time
+});
+```
+
+### Timeout
+
+Set a per-case timeout:
+
+```typescript
+await evaluate({
+  // ...
+  timeout: 30_000, // 30 seconds per case
+});
+```
+
+### Threshold
+
+Set the minimum passing score:
+
+```typescript
+await evaluate({
+  // ...
+  threshold: 0.8, // Require 80% score to pass
+});
+```
+
+### Trials
+
+Run each case multiple times to reduce variance:
+
+```typescript
+await evaluate({
+  // ...
+  trials: 3, // Run each case 3 times, average the scores
+});
+```
+
+## Builder Pattern
+
+The `evaluate()` function returns an `EvalBuilder` that supports chaining:
+
+```typescript
+// Run only failed cases from the previous run
+await evaluate(options).failed();
+
+// Run specific cases
+await evaluate(options).cases('0-10,15,20-25');
+
+// Run a random sample
+await evaluate(options).sample(50);
+
+// Throw if any cases fail
+await evaluate(options).assert();
+```
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Datasets" icon="database" href="/evals/datasets">
+    Learn about dataset loading and transforms
+  </Card>
+  <Card title="Scorers" icon="star" href="/evals/scorers">
+    Explore all built-in scorers
+  </Card>
+  <Card title="Comparison" icon="chart-line" href="/evals/comparison">
+    Compare runs and detect regressions
+  </Card>
+  <Card title="API Reference" icon="code" href="/evals/api/evaluate">
+    Full API documentation
+  </Card>
+</CardGroup>

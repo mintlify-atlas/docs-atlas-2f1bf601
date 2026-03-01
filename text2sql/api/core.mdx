@@ -1,0 +1,425 @@
+---
+title: Core API Reference
+description: Complete API reference for Text2SQL core classes and methods
+---
+
+# Core API Reference
+
+Complete API documentation for the Text2SQL core classes.
+
+## Text2Sql Class
+
+The main class for natural language to SQL conversion.
+
+### Constructor
+
+```typescript
+new Text2Sql(config: Text2SqlConfig)
+```
+
+#### Text2SqlConfig
+
+```typescript
+interface Text2SqlConfig {
+  // Required
+  version: string;               // Schema version for cache invalidation
+  model: AgentModel;            // AI model from Vercel AI SDK
+  adapter: Adapter;              // Database adapter
+  store: ContextStore;          // Context storage
+  
+  // Optional
+  teachingsOptions?: TeachingsOptions;
+  tools?: Record<string, Tool>;  // Additional tools
+  transform?: StreamTextTransform | StreamTextTransform[];
+  filesystem?: IFileSystem;      // File system implementation
+}
+```
+
+#### TeachingsOptions
+
+```typescript
+interface TeachingsOptions {
+  date?: 'strict' | false;  // Date clarification behavior
+  fragments?: ContextFragment[];  // Custom teachables
+}
+```
+
+### Methods
+
+#### toSql()
+
+Generate SQL from natural language:
+
+```typescript
+async toSql(input: string): Promise<string>
+```
+
+**Parameters:**
+- `input` - Natural language question
+
+**Returns:**
+- Promise resolving to SQL query string
+
+**Example:**
+```typescript
+const sql = await text2sql.toSql('Show me top 10 customers by revenue');
+console.log(sql);
+// SELECT * FROM customers ORDER BY total_revenue DESC LIMIT 10
+```
+
+#### chat()
+
+Start or continue a conversational session:
+
+```typescript
+async chat(
+  messages: ChatMessage[],
+  options?: ChatOptions
+): Promise<UIMessageStream>
+```
+
+**Parameters:**
+- `messages` - Array of chat messages
+- `options` - Optional chat configuration
+
+**ChatMessage:**
+```typescript
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  id?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+**ChatOptions:**
+```typescript
+interface ChatOptions {
+  chatId?: string;          // Conversation ID
+  userId?: string;          // User ID
+  abortSignal?: AbortSignal;  // For cancellation
+}
+```
+
+**Returns:**
+- Promise resolving to `UIMessageStream`
+
+**Example:**
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me all customers' }
+], {
+  chatId: 'conversation-123',
+  userId: 'user-456'
+});
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text') {
+    console.log(chunk.content);
+  }
+}
+```
+
+#### index()
+
+Manually trigger database introspection:
+
+```typescript
+async index(): Promise<ContextFragment[]>
+```
+
+**Returns:**
+- Promise resolving to array of context fragments
+
+**Example:**
+```typescript
+const schemaFragments = await text2sql.index();
+console.log(schemaFragments);
+```
+
+#### toPairs()
+
+Generate training data pairs using a producer factory:
+
+```typescript
+async toPairs<T extends PairProducer>(
+  factory: (adapter: Adapter) => T
+): Promise<ExtractedPair[]>
+```
+
+**Parameters:**
+- `factory` - Function that creates a pair producer
+
+**Returns:**
+- Promise resolving to array of question-SQL pairs
+
+**Example:**
+```typescript
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
+
+const sqls = [
+  'SELECT * FROM customers WHERE status = "active"',
+  'SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 7 DAY'
+];
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, { validateSql: true })
+);
+
+console.log(pairs);
+// [
+//   { question: "Show active customers", sql: "SELECT * FROM customers WHERE status = 'active'" },
+//   { question: "Count orders from last week", sql: "SELECT COUNT(*) ..." }
+// ]
+```
+
+## Adapter Abstract Class
+
+Base class for all database adapters.
+
+### Abstract Properties
+
+```typescript
+abstract class Adapter {
+  abstract readonly grounding: GroundingFn[];
+  abstract readonly formatterLanguage: SqlLanguage;
+  abstract readonly defaultSchema: string | undefined;
+  abstract readonly systemSchemas: string[];
+}
+```
+
+### Abstract Methods
+
+#### execute()
+
+```typescript
+abstract execute(sql: string): Promise<any[]> | any[];
+```
+
+Execute SQL and return results.
+
+#### validate()
+
+```typescript
+abstract validate(sql: string): Promise<string | void> | string | void;
+```
+
+Validate SQL without executing. Returns error message or void.
+
+#### runQuery()
+
+```typescript
+abstract runQuery<Row>(sql: string): Promise<Row[]> | Row[];
+```
+
+Run introspection query.
+
+#### quoteIdentifier()
+
+```typescript
+abstract quoteIdentifier(name: string): string;
+```
+
+Quote identifier (table/column name) for safe use in SQL.
+
+**Examples:**
+```typescript
+// PostgreSQL, SQLite
+adapter.quoteIdentifier('my_table');  // "my_table"
+
+// SQL Server
+adapter.quoteIdentifier('my_table');  // [my_table]
+
+// MySQL, BigQuery
+adapter.quoteIdentifier('my_table');  // `my_table`
+```
+
+#### escape()
+
+```typescript
+abstract escape(value: string): string;
+```
+
+Escape string value for safe use in SQL.
+
+#### buildSampleRowsQuery()
+
+```typescript
+abstract buildSampleRowsQuery(
+  tableName: string,
+  columns: string[] | undefined,
+  limit: number
+): string;
+```
+
+Build a SELECT query to sample rows from a table.
+
+### Concrete Methods
+
+#### introspect()
+
+```typescript
+async introspect(ctx?: GroundingContext): Promise<ContextFragment[]>
+```
+
+Introspect database schema and return context fragments.
+
+#### format()
+
+```typescript
+format(sql: string): string
+```
+
+Format SQL according to database dialect.
+
+**Example:**
+```typescript
+const formatted = adapter.format(
+  'SELECT * FROM customers WHERE status="active"'
+);
+
+console.log(formatted);
+// SELECT
+//   *
+// FROM
+//   customers
+// WHERE
+//   status = 'active'
+```
+
+#### toNumber()
+
+```typescript
+toNumber(value: unknown): number | undefined
+```
+
+Convert unknown database value to number.
+
+#### parseTableName()
+
+```typescript
+parseTableName(name: string): { schema: string; table: string }
+```
+
+Parse qualified table name into schema and table parts.
+
+#### escapeString()
+
+```typescript
+escapeString(value: string): string
+```
+
+Escape string value for use in SQL string literals.
+
+## Types
+
+### Table
+
+```typescript
+interface Table {
+  name: string;
+  schema?: string;
+  rawName?: string;
+  columns: Column[];
+  rowCount?: number;
+  sizeHint?: 'tiny' | 'small' | 'medium' | 'large' | 'huge';
+  indexes?: TableIndex[];
+  constraints?: TableConstraint[];
+}
+```
+
+### Column
+
+```typescript
+interface Column {
+  name: string;
+  type: string;
+  kind?: 'LowCardinality' | 'Enum';
+  values?: string[];
+  isIndexed?: boolean;
+  stats?: ColumnStats;
+}
+```
+
+### ColumnStats
+
+```typescript
+interface ColumnStats {
+  min?: string;
+  max?: string;
+  nullFraction?: number;      // 0.0 to 1.0
+  nDistinct?: number;         // Estimated distinct values
+  correlation?: number;       // -1.0 to 1.0 (PostgreSQL)
+}
+```
+
+### Relationship
+
+```typescript
+interface Relationship {
+  table: string;
+  from: string[];              // Source columns
+  referenced_table: string;
+  to: string[];                // Target columns
+}
+```
+
+### ExtractedPair
+
+```typescript
+interface ExtractedPair {
+  question: string;
+  sql: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+## Utility Functions
+
+### toTeachings()
+
+Auto-generate teachables from schema:
+
+```typescript
+async function toTeachings(
+  input: { schema: string; context?: string },
+  options?: GenerateToTeachingsOptions
+): Promise<ContextFragment[]>
+```
+
+**Parameters:**
+- `input.schema` - Schema as string (JSON or text)
+- `input.context` - Optional additional context
+- `options.model` - Optional AI model (default: groq)
+
+**Returns:**
+- Promise resolving to teachable fragments
+
+**Example:**
+```typescript
+import { toTeachings } from '@deepagents/text2sql';
+
+const fragments = await text2sql.index();
+const teachables = await toTeachings({
+  schema: JSON.stringify(fragments),
+  context: 'E-commerce database'
+});
+
+console.log(teachables);
+// [
+//   term('SKU', 'stock keeping unit'),
+//   hint('status uses lowercase values'),
+//   guardrail({ rule: 'Never expose credit_card column' })
+// ]
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Teachables API" icon="graduation-cap" href="/text2sql/api/teachables">
+    Teachable fragment types
+  </Card>
+  <Card title="Adapters API" icon="database" href="/text2sql/api/adapters">
+    Adapter interface details
+  </Card>
+</CardGroup>

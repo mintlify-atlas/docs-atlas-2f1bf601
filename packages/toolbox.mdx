@@ -1,0 +1,554 @@
+---
+title: '@deepagents/toolbox'
+description: 'Pre-built tools for common agent tasks'
+---
+
+## Overview
+
+The `@deepagents/toolbox` package provides ready-to-use tools for common agent tasks. All tools are compatible with the Vercel AI SDK and can be directly used with `@deepagents/agent`.
+
+## Installation
+
+```bash
+npm install @deepagents/toolbox
+```
+
+**Dependencies:**
+- `ai` - Vercel AI SDK
+- `zod` - Schema validation
+- `duck-duck-scrape` - DuckDuckGo search
+- `nano-spawn` - Process execution
+- `fast-glob` - File searching
+- `@deepagents/retrieval` - Document retrieval
+
+## Quick Example
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import { ddgSearch, hackernewsSearch, weather } from '@deepagents/toolbox';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You help users find information.',
+  tools: {
+    search: ddgSearch,
+    news: hackernewsSearch,
+    getWeather: weather,
+  },
+});
+
+const stream = execute(
+  assistant,
+  'What is the weather in Tokyo and latest tech news?',
+  {}
+);
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Web Search Tools
+
+### DuckDuckGo Search
+
+Search the web using DuckDuckGo:
+
+```typescript
+import { ddgSearch } from '@deepagents/toolbox';
+
+const tool = ddgSearch;
+
+// In agent
+const agent = agent({
+  name: 'searcher',
+  model: openai('gpt-4o'),
+  prompt: 'Search the web for information.',
+  tools: { search: ddgSearch },
+});
+```
+
+**Parameters:**
+- `query: string` - Search query
+- `maxResults?: number` - Maximum results (default: 5)
+
+**Returns:**
+```typescript
+{
+  results: Array<{
+    title: string;
+    url: string;
+    snippet: string;
+  }>;
+}
+```
+
+### Web Search (General)
+
+General web search abstraction:
+
+```typescript
+import { webSearch } from '@deepagents/toolbox';
+
+const tool = webSearch({
+  provider: 'duckduckgo', // or 'google', 'bing'
+  apiKey: process.env.SEARCH_API_KEY, // if needed
+});
+```
+
+### HackerNews Search
+
+Search HackerNews stories:
+
+```typescript
+import { hackernewsSearch } from '@deepagents/toolbox';
+
+const tool = hackernewsSearch;
+
+// Usage
+const agent = agent({
+  name: 'news_agent',
+  model: openai('gpt-4o'),
+  prompt: 'Find tech news on HackerNews.',
+  tools: { hnSearch: hackernewsSearch },
+});
+```
+
+**Parameters:**
+- `query: string` - Search query
+- `limit?: number` - Max results (default: 10)
+- `sort?: 'relevance' | 'date'` - Sort order
+
+**Returns:**
+```typescript
+{
+  stories: Array<{
+    title: string;
+    url: string;
+    points: number;
+    author: string;
+    time: string;
+    comments: number;
+  }>;
+}
+```
+
+## Filesystem Tools
+
+File operations for agents:
+
+```typescript
+import {
+  readFile,
+  writeFile,
+  listFiles,
+  deleteFile,
+} from '@deepagents/toolbox';
+
+const agent = agent({
+  name: 'file_manager',
+  model: openai('gpt-4o'),
+  prompt: 'Manage files for the user.',
+  tools: {
+    read: readFile,
+    write: writeFile,
+    list: listFiles,
+    delete: deleteFile,
+  },
+});
+```
+
+### Read File
+
+```typescript
+import { readFile } from '@deepagents/toolbox';
+
+// Parameters
+{
+  path: string;           // File path
+  encoding?: string;      // default: 'utf-8'
+}
+
+// Returns
+{
+  content: string;
+  size: number;
+  modified: string;
+}
+```
+
+### Write File
+
+```typescript
+import { writeFile } from '@deepagents/toolbox';
+
+// Parameters
+{
+  path: string;
+  content: string;
+  encoding?: string;
+  createDirs?: boolean;   // Create parent dirs
+}
+
+// Returns
+{
+  success: boolean;
+  path: string;
+  size: number;
+}
+```
+
+### List Files
+
+```typescript
+import { listFiles } from '@deepagents/toolbox';
+
+// Parameters
+{
+  path: string;           // Directory path
+  pattern?: string;       // Glob pattern
+  recursive?: boolean;    // Include subdirs
+}
+
+// Returns
+{
+  files: Array<{
+    name: string;
+    path: string;
+    size: number;
+    modified: string;
+    isDirectory: boolean;
+  }>;
+}
+```
+
+<Warning>
+Filesystem tools can access any file the process has permissions for. Use with caution and implement proper access controls.
+</Warning>
+
+## Data Tools
+
+### Scratchpad
+
+Temporary note storage:
+
+```typescript
+import { scratchpad } from '@deepagents/toolbox';
+
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'Use scratchpad for temporary notes.',
+  tools: { notes: scratchpad },
+});
+```
+
+**Operations:**
+- `write(key, value)` - Save note
+- `read(key)` - Retrieve note
+- `list()` - List all notes
+- `delete(key)` - Remove note
+
+### Weather Data
+
+Get weather information:
+
+```typescript
+import { weather } from '@deepagents/toolbox';
+
+const tool = weather({
+  apiKey: process.env.WEATHER_API_KEY,
+  provider: 'openweather', // or 'weatherapi'
+});
+```
+
+**Parameters:**
+```typescript
+{
+  location: string;       // City name or coordinates
+  units?: 'metric' | 'imperial';
+}
+```
+
+**Returns:**
+```typescript
+{
+  location: string;
+  temperature: number;
+  condition: string;
+  humidity: number;
+  windSpeed: number;
+  forecast?: Array<{
+    date: string;
+    high: number;
+    low: number;
+    condition: string;
+  }>;
+}
+```
+
+## Format Tools
+
+### User Story Formatter
+
+Format requirements as user stories:
+
+```typescript
+import { userStoryFormatter } from '@deepagents/toolbox';
+
+const tool = userStoryFormatter;
+
+// Parameters
+{
+  feature: string;        // Feature description
+  role?: string;          // User role
+  benefit?: string;       // Expected benefit
+}
+
+// Returns
+{
+  userStory: string;      // Formatted user story
+  acceptanceCriteria: string[];
+}
+```
+
+**Example Output:**
+```
+As a user
+I want to export data to CSV
+So that I can analyze it in Excel
+
+Acceptance Criteria:
+- User can select export format
+- CSV includes all visible columns
+- File downloads automatically
+```
+
+## Container Tools
+
+Docker container management:
+
+```typescript
+import { containerTool } from '@deepagents/toolbox';
+
+const tool = containerTool({
+  dockerSocket: '/var/run/docker.sock',
+});
+
+const agent = agent({
+  name: 'devops',
+  model: openai('gpt-4o'),
+  prompt: 'Manage Docker containers.',
+  tools: { container: tool },
+});
+```
+
+**Operations:**
+- `list()` - List containers
+- `start(containerId)` - Start container
+- `stop(containerId)` - Stop container
+- `logs(containerId)` - Get logs
+- `inspect(containerId)` - Inspect container
+
+## Custom Tool Wrappers
+
+### Rate Limited Tool
+
+Add rate limiting to any tool:
+
+```typescript
+import { rateLimited } from '@deepagents/toolbox';
+
+const limitedSearch = rateLimited(ddgSearch, {
+  maxCalls: 10,
+  windowMs: 60000, // 1 minute
+});
+```
+
+### Cached Tool
+
+Cache tool results:
+
+```typescript
+import { cached } from '@deepagents/toolbox';
+
+const cachedSearch = cached(ddgSearch, {
+  ttl: 300000, // 5 minutes
+  maxSize: 100,
+});
+```
+
+### Logged Tool
+
+Add logging to tool calls:
+
+```typescript
+import { logged } from '@deepagents/toolbox';
+
+const loggedSearch = logged(ddgSearch, {
+  logFn: (params, result) => {
+    console.log('Search:', params.query, '→', result.results.length, 'results');
+  },
+});
+```
+
+## Creating Custom Tools
+
+Build your own tools:
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+export const customTool = tool({
+  description: 'Your tool description',
+  parameters: z.object({
+    param1: z.string(),
+    param2: z.number().optional(),
+  }),
+  execute: async ({ param1, param2 }) => {
+    // Your implementation
+    return {
+      result: 'data',
+    };
+  },
+});
+```
+
+### Tool with Context
+
+```typescript
+import { toState } from '@deepagents/agent';
+
+interface MyContext {
+  userId: string;
+}
+
+export const contextAwareTool = tool({
+  description: 'Tool that uses context',
+  parameters: z.object({
+    action: z.string(),
+  }),
+  execute: async ({ action }, options) => {
+    const ctx = toState<MyContext>(options);
+    
+    // Use context
+    console.log('User:', ctx.userId);
+    
+    return { success: true };
+  },
+});
+```
+
+## Tool Composition
+
+Combine multiple tools:
+
+```typescript
+import { composeTool } from '@deepagents/toolbox';
+
+const searchAndFormat = composeTool({
+  tools: [ddgSearch, userStoryFormatter],
+  combine: async (searchResults, formatted) => {
+    return {
+      data: searchResults,
+      formatted: formatted,
+    };
+  },
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="shield-halved">
+    Always handle errors gracefully in tools
+  </Card>
+  <Card title="Timeouts" icon="clock">
+    Set reasonable timeouts for network calls
+  </Card>
+  <Card title="Validation" icon="check-double">
+    Validate all inputs with Zod schemas
+  </Card>
+  <Card title="Documentation" icon="book">
+    Write clear descriptions and examples
+  </Card>
+  <Card title="Rate Limits" icon="gauge">
+    Respect API rate limits
+  </Card>
+  <Card title="Security" icon="lock">
+    Never expose sensitive data in responses
+  </Card>
+</CardGroup>
+
+## Complete Example
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import {
+  ddgSearch,
+  hackernewsSearch,
+  weather,
+  readFile,
+  writeFile,
+  scratchpad,
+  rateLimited,
+  cached,
+} from '@deepagents/toolbox';
+
+// Create rate-limited and cached tools
+const safeSearch = rateLimited(
+  cached(ddgSearch, { ttl: 300000 }),
+  { maxCalls: 20, windowMs: 60000 }
+);
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: `You are a helpful assistant with access to:
+    - Web search
+    - HackerNews
+    - Weather data
+    - File operations
+    - Temporary notes`,
+  tools: {
+    search: safeSearch,
+    news: hackernewsSearch,
+    weather: weather({ apiKey: process.env.WEATHER_KEY }),
+    read: readFile,
+    write: writeFile,
+    notes: scratchpad,
+  },
+});
+
+const stream = execute(
+  assistant,
+  'Research the latest in AI and save a summary to research.md',
+  {}
+);
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/toolbox](https://www.npmjs.com/package/@deepagents/toolbox)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Use tools with agents
+  </Card>
+  <Card title="@deepagents/retrieval" icon="file-import" href="/packages/retrieval">
+    Document retrieval tools
+  </Card>
+</CardGroup>

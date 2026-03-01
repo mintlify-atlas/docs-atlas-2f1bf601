@@ -1,0 +1,473 @@
+---
+title: Teachables API Reference
+description: Complete API for all teachable fragment types
+---
+
+# Teachables API Reference
+
+Complete documentation for all 10 teachable fragment types from `@deepagents/context`.
+
+## Fragment Types
+
+All teachables are imported from `@deepagents/context`:
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  explain,
+  clarification,
+  workflow,
+  quirk,
+  styleGuide,
+  analogy
+} from '@deepagents/context';
+```
+
+## term()
+
+Define business terminology and abbreviations.
+
+```typescript
+function term(name: string, definition: string): ContextFragment
+```
+
+**Parameters:**
+- `name` - Term or abbreviation
+- `definition` - Full definition
+
+**Example:**
+```typescript
+term('MRR', 'monthly recurring revenue')
+term('ARR', 'annual recurring revenue')
+term('CAC', 'customer acquisition cost')
+```
+
+## hint()
+
+Provide helpful hints for query generation.
+
+```typescript
+function hint(text: string): ContextFragment
+```
+
+**Parameters:**
+- `text` - Hint description
+
+**Example:**
+```typescript
+hint('Always exclude test accounts with email ending in @test.com')
+hint('Use created_at for order dates, not updated_at')
+hint('The users table contains both customers and employees')
+```
+
+## guardrail()
+
+Enforce safety rules and constraints.
+
+```typescript
+function guardrail(config: GuardrailConfig): ContextFragment
+
+interface GuardrailConfig {
+  rule: string;
+  reason?: string;
+  action?: string;
+}
+```
+
+**Parameters:**
+- `rule` - The safety rule
+- `reason` - Why this rule exists (optional)
+- `action` - What to do instead (optional)
+
+**Example:**
+```typescript
+guardrail({
+  rule: 'Never expose individual salaries',
+  reason: 'Confidential HR data',
+  action: 'Aggregate by department instead'
+})
+
+guardrail({
+  rule: 'Never return more than 10,000 rows without aggregation',
+  reason: 'Performance protection'
+})
+```
+
+## example()
+
+Provide question-answer pairs.
+
+```typescript
+function example(config: ExampleConfig): ContextFragment
+
+interface ExampleConfig {
+  question: string;
+  answer: string;
+  note?: string;
+}
+```
+
+**Parameters:**
+- `question` - Natural language question
+- `answer` - SQL query answer
+- `note` - Optional explanation
+
+**Example:**
+```typescript
+example({
+  question: 'show me churned customers',
+  answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+  note: 'Status values are lowercase'
+})
+
+example({
+  question: 'monthly revenue trend',
+  answer: `
+    SELECT 
+      DATE_TRUNC('month', created_at) AS month,
+      SUM(amount) AS revenue
+    FROM orders
+    WHERE status = 'completed'
+    GROUP BY month
+    ORDER BY month DESC
+  `
+})
+```
+
+## explain()
+
+Explain technical concepts and their implications.
+
+```typescript
+function explain(config: ExplainConfig): ContextFragment
+
+interface ExplainConfig {
+  concept: string;
+  explanation: string;
+  therefore?: string;
+}
+```
+
+**Parameters:**
+- `concept` - Concept name
+- `explanation` - What it means
+- `therefore` - Practical implication
+
+**Example:**
+```typescript
+explain({
+  concept: 'soft delete pattern',
+  explanation: 'Records are not physically deleted. Instead, deleted_at timestamp is set.',
+  therefore: 'Always add WHERE deleted_at IS NULL to exclude soft-deleted records'
+})
+
+explain({
+  concept: 'status lifecycle',
+  explanation: 'Orders move: pending → processing → completed OR cancelled',
+  therefore: 'Use status IN ("completed", "cancelled") for finalized orders'
+})
+```
+
+## clarification()
+
+Define when to ask for clarification.
+
+```typescript
+function clarification(config: ClarificationConfig): ContextFragment
+
+interface ClarificationConfig {
+  when: string;
+  ask: string;
+  reason: string;
+}
+```
+
+**Parameters:**
+- `when` - Trigger condition
+- `ask` - Question to ask user
+- `reason` - Why clarification is needed
+
+**Example:**
+```typescript
+clarification({
+  when: 'User asks for "revenue" without specifying gross vs net',
+  ask: 'Do you mean gross revenue or net revenue (after refunds)?',
+  reason: 'Business has separate metrics for gross and net revenue'
+})
+
+clarification({
+  when: 'User asks for "active users" without timeframe',
+  ask: 'Active in the last 30 days, 90 days, or year?',
+  reason: 'Multiple definitions of "active" exist'
+})
+```
+
+## workflow()
+
+Define multi-step procedural workflows.
+
+```typescript
+function workflow(config: WorkflowConfig): ContextFragment
+
+interface WorkflowConfig {
+  task: string;
+  steps: string[];
+  triggers?: string[];
+  notes?: string;
+}
+```
+
+**Parameters:**
+- `task` - Task name
+- `steps` - Ordered steps
+- `triggers` - Keywords that trigger this workflow
+- `notes` - Additional notes
+
+**Example:**
+```typescript
+workflow({
+  task: 'Cohort retention analysis',
+  steps: [
+    'Identify cohort by signup month',
+    'For each month after signup, count active users',
+    'Calculate retention rate: active / cohort_size',
+    'Group by cohort and months_since_signup'
+  ],
+  triggers: ['retention', 'cohort'],
+  notes: 'Active = logged in within that month'
+})
+
+workflow({
+  task: 'Error recovery',
+  triggers: ['SQL error', 'query failed'],
+  steps: [
+    'Classify the error type',
+    'For syntax errors: check SQL keywords and quotes',
+    'For missing table: re-check schema',
+    'Apply targeted fix',
+    'Retry with corrected query'
+  ],
+  notes: 'Maximum 3 retry attempts'
+})
+```
+
+## quirk()
+
+Document data anomalies and workarounds.
+
+```typescript
+function quirk(config: QuirkConfig): ContextFragment
+
+interface QuirkConfig {
+  issue: string;
+  workaround: string;
+}
+```
+
+**Parameters:**
+- `issue` - The data anomaly
+- `workaround` - How to handle it
+
+**Example:**
+```typescript
+quirk({
+  issue: 'Legacy orders have NULL in created_at column',
+  workaround: 'Use COALESCE(created_at, migrated_at) for date filtering'
+})
+
+quirk({
+  issue: 'Email addresses before 2020 were not normalized to lowercase',
+  workaround: 'Use LOWER(email) for case-insensitive matching'
+})
+```
+
+## styleGuide()
+
+Enforce SQL coding standards.
+
+```typescript
+function styleGuide(config: StyleGuideConfig): ContextFragment
+
+interface StyleGuideConfig {
+  prefer: string;
+  never?: string;
+  always?: string;
+}
+```
+
+**Parameters:**
+- `prefer` - Preferred style
+- `never` - What to avoid
+- `always` - What to always do
+
+**Example:**
+```typescript
+styleGuide({
+  prefer: 'Full table names as aliases (users AS users)',
+  never: 'Abbreviated aliases (u, oi, t1, t2)'
+})
+
+styleGuide({
+  prefer: 'Explicit column names in SELECT',
+  never: 'SELECT * in production queries',
+  always: 'Include ORDER BY for deterministic results'
+})
+```
+
+## analogy()
+
+Explain relationships using analogies.
+
+```typescript
+function analogy(config: AnalogyConfig): ContextFragment
+
+interface AnalogyConfig {
+  concepts: string[];        // At least 2
+  relationship: string;
+  insight?: string;
+  therefore?: string;
+  pitfall?: string;
+}
+```
+
+**Parameters:**
+- `concepts` - Concepts being compared (min 2)
+- `relationship` - How they relate
+- `insight` - Key insight
+- `therefore` - Practical implication
+- `pitfall` - Common mistake to avoid
+
+**Example:**
+```typescript
+analogy({
+  concepts: ['customers', 'accounts'],
+  relationship: 'One customer can have multiple accounts (personal, business)',
+  insight: 'Use customers for billing, accounts for usage tracking',
+  therefore: 'Join through customer_id when aggregating usage'
+})
+
+analogy({
+  concepts: ['orders', 'line_items'],
+  relationship: 'Orders are shopping carts, line_items are individual products',
+  pitfall: 'Counting orders counts carts, not products sold'
+})
+```
+
+## User Fragments
+
+Additional fragment types for user-specific context:
+
+### identity()
+
+```typescript
+function identity(config: IdentityConfig): ContextFragment
+
+interface IdentityConfig {
+  name?: string;
+  role?: string;
+  department?: string;
+  [key: string]: any;
+}
+```
+
+**Example:**
+```typescript
+identity({
+  name: 'John Doe',
+  role: 'Sales Manager',
+  department: 'Sales',
+  teamId: 5
+})
+```
+
+### preference()
+
+```typescript
+function preference(text: string): ContextFragment
+```
+
+**Example:**
+```typescript
+preference('Always show revenue in USD, rounded to 2 decimals')
+preference('Include column headers in all results')
+```
+
+### alias()
+
+```typescript
+function alias(name: string, expansion: string): ContextFragment
+```
+
+**Example:**
+```typescript
+alias('my team', 'sales_team_id = 5')
+alias('last quarter', 'created_at >= "2024-10-01" AND created_at < "2025-01-01"')
+```
+
+## Best Practices
+
+### 1. Combine Fragment Types
+
+```typescript
+const saasTeachables = [
+  // Define terms
+  term('MRR', 'monthly recurring revenue'),
+  term('churn', 'customer cancellation'),
+  
+  // Provide examples
+  example({
+    question: 'Show MRR trend',
+    answer: 'SELECT DATE_TRUNC(...) ...'
+  }),
+  
+  // Add guardrails
+  guardrail({
+    rule: 'Never expose individual MRR',
+    action: 'Aggregate by cohort or plan'
+  })
+];
+```
+
+### 2. Document Everything
+
+```typescript
+// Terms for abbreviations
+term('LTV', 'lifetime value'),
+
+// Hints for conventions
+hint('Use subscription_start_at for cohort analysis'),
+
+// Quirks for data issues
+quirk({
+  issue: 'Trial MRR included before March 2024',
+  workaround: 'Exclude trials: WHERE plan_name != "trial"'
+})
+```
+
+### 3. Version Control
+
+```typescript
+// teachables-v1.ts
+export const teachablesV1 = [...];
+
+// teachables-v2.ts (schema changed)
+export const teachablesV2 = [
+  ...teachablesV1,
+  term('NRR', 'net revenue retention'),  // New
+  quirk({ issue: 'Legacy MRR changed 2024', ... })  // Updated
+];
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/text2sql/api/core">
+    Text2SQL core classes
+  </Card>
+  <Card title="Teachables Guide" icon="graduation-cap" href="/text2sql/teachables">
+    Using teachables effectively
+  </Card>
+</CardGroup>

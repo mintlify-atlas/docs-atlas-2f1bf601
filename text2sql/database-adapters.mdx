@@ -1,0 +1,421 @@
+---
+title: Database Adapters
+description: Overview of supported databases and adapter features
+---
+
+# Database Adapters
+
+Text2SQL supports multiple database systems through dedicated adapters. Each adapter implements database-specific introspection, query validation, and SQL dialect handling.
+
+## Supported Databases
+
+<CardGroup cols={2}>
+  <Card title="SQLite" icon="database" href="/text2sql/adapters/sqlite">
+    Lightweight embedded database
+  </Card>
+  <Card title="PostgreSQL" icon="elephant" href="/text2sql/adapters/postgres">
+    Advanced open-source database
+  </Card>
+  <Card title="SQL Server" icon="server" href="/text2sql/adapters/sqlserver">
+    Microsoft enterprise database
+  </Card>
+  <Card title="MySQL" icon="leaf" href="/text2sql/adapters/mysql">
+    Popular open-source database
+  </Card>
+  <Card title="BigQuery" icon="cloud" href="/text2sql/adapters/bigquery">
+    Google Cloud data warehouse
+  </Card>
+</CardGroup>
+
+## Adapter Comparison
+
+| Feature | SQLite | PostgreSQL | SQL Server | MySQL | BigQuery |
+|---------|--------|------------|------------|-------|----------|
+| **Schemas** | No | Yes | Yes | Yes | Yes |
+| **Foreign Keys** | Yes | Yes | Yes | Yes | Yes |
+| **Indexes** | Yes | Yes | Yes | Yes | Limited |
+| **Views** | Yes | Yes | Yes | Yes | Yes |
+| **Constraints** | Yes | Yes | Yes | Yes | Yes |
+| **Column Stats** | Yes | Yes | Yes | Yes | No |
+| **Row Counts** | Yes | Yes | Yes | Yes | Yes |
+| **Transactions** | Yes | Yes | Yes | Yes | No |
+
+## Common Adapter Interface
+
+All adapters implement the same core interface:
+
+```typescript
+abstract class Adapter {
+  // Execute SQL query
+  abstract execute(sql: string): Promise<any[]>;
+  
+  // Validate SQL without executing
+  abstract validate(sql: string): Promise<string | void>;
+  
+  // Introspect database schema
+  async introspect(): Promise<ContextFragment[]>;
+  
+  // Quote identifier (table/column name)
+  abstract quoteIdentifier(name: string): string;
+  
+  // Escape string value
+  abstract escape(value: string): string;
+  
+  // Format SQL for the dialect
+  format(sql: string): string;
+  
+  // Build sample query
+  abstract buildSampleRowsQuery(
+    tableName: string,
+    columns: string[] | undefined,
+    limit: number
+  ): string;
+}
+```
+
+## Grounding Functions
+
+Grounding functions control what schema metadata the AI receives. All adapters support these groundings:
+
+### Available Groundings
+
+#### `tables(config?)`
+
+Introspects tables, columns, and data types.
+
+```typescript
+import { tables } from '@deepagents/text2sql/[adapter]';
+
+grounding: [
+  tables({
+    include?: string[] | RegExp,  // Filter tables
+    exclude?: string[] | RegExp   // Exclude tables
+  })
+]
+```
+
+#### `views(config?)`
+
+Introspects database views.
+
+```typescript
+import { views } from '@deepagents/text2sql/[adapter]';
+
+grounding: [
+  views({
+    include?: string[] | RegExp
+  })
+]
+```
+
+#### `info(config?)`
+
+Provides database version and metadata.
+
+```typescript
+import { info } from '@deepagents/text2sql/[adapter]';
+
+grounding: [info()]
+```
+
+#### `indexes(config?)`
+
+Introspects table indexes for performance hints.
+
+```typescript
+import { indexes } from '@deepagents/text2sql/[adapter]';
+
+grounding: [indexes()]
+```
+
+#### `constraints(config?)`
+
+Introspects constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK).
+
+```typescript
+import { constraints } from '@deepagents/text2sql/[adapter]';
+
+grounding: [constraints()]
+```
+
+#### `rowCount(config?)`
+
+Counts rows and classifies table sizes (tiny, small, medium, large, huge).
+
+```typescript
+import { rowCount } from '@deepagents/text2sql/[adapter]';
+
+grounding: [rowCount()]
+```
+
+#### `columnStats(config?)`
+
+Collects column statistics (min, max, null fraction, correlation).
+
+```typescript
+import { columnStats } from '@deepagents/text2sql/[adapter]';
+
+grounding: [columnStats()]
+```
+
+#### `columnValues(config?)`
+
+Fetches distinct values for low-cardinality columns (enums).
+
+```typescript
+import { columnValues } from '@deepagents/text2sql/[adapter]';
+
+grounding: [
+  columnValues({
+    limit: 20  // Max distinct values per column
+  })
+]
+```
+
+### Recommended Grounding Combinations
+
+#### Minimal (Fast Introspection)
+
+```typescript
+grounding: [
+  tables(),
+  info()
+]
+```
+
+#### Balanced (Most Common)
+
+```typescript
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints()
+]
+```
+
+#### Comprehensive (Slower, Maximum Context)
+
+```typescript
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints(),
+  rowCount(),
+  columnStats(),
+  columnValues({ limit: 20 })
+]
+```
+
+## SQL Dialect Support
+
+Each adapter formats SQL according to its database's dialect:
+
+### Identifier Quoting
+
+```typescript
+// PostgreSQL, SQLite, BigQuery
+adapter.quoteIdentifier('my_table') // "my_table"
+
+// SQL Server
+adapter.quoteIdentifier('my_table') // [my_table]
+
+// MySQL
+adapter.quoteIdentifier('my_table') // `my_table`
+```
+
+### String Escaping
+
+```typescript
+// All adapters escape single quotes
+adapter.escape("O'Reilly") // O''Reilly
+```
+
+### LIMIT vs TOP
+
+```typescript
+// PostgreSQL, SQLite, MySQL, BigQuery
+SELECT * FROM users LIMIT 10
+
+// SQL Server
+SELECT TOP 10 * FROM users
+```
+
+## Schema Filtering
+
+PostgreSQL, SQL Server, MySQL, and BigQuery support schema filtering:
+
+```typescript
+const adapter = new Postgres({
+  execute: async (sql) => { /* ... */ },
+  grounding: [tables(), constraints()],
+  schemas: ['public', 'analytics']  // Only introspect these schemas
+});
+```
+
+Without `schemas`, system schemas are excluded automatically:
+- PostgreSQL: `pg_catalog`, `information_schema`
+- SQL Server: `sys`, `INFORMATION_SCHEMA`
+- MySQL: `information_schema`, `mysql`, `performance_schema`
+
+## Error Handling
+
+Each adapter provides database-specific error formatting:
+
+```typescript
+try {
+  const sql = await text2sql.toSql('Show me invalid_table');
+} catch (error) {
+  console.error(error);
+}
+```
+
+Error response includes:
+
+```json
+{
+  "error": "no such table: invalid_table",
+  "error_type": "MISSING_TABLE",
+  "suggestion": "Check the database schema for the correct table name.",
+  "sql_attempted": "SELECT * FROM invalid_table"
+}
+```
+
+### Error Types
+
+- `MISSING_TABLE` - Referenced table does not exist
+- `INVALID_COLUMN` - Referenced column does not exist or is ambiguous
+- `SYNTAX_ERROR` - SQL syntax error
+- `INVALID_FUNCTION` - Function or operator not recognized
+- `CONSTRAINT_ERROR` - Constraint violation
+- `UNKNOWN_ERROR` - Unclassified error
+
+## Validation
+
+All adapters validate SQL using `EXPLAIN` before execution:
+
+```typescript
+const validationError = await adapter.validate(
+  'SELECT * FROM invalid_table'
+);
+
+if (validationError) {
+  console.error('Invalid SQL:', validationError);
+}
+```
+
+Custom validation:
+
+```typescript
+const adapter = new Postgres({
+  execute: async (sql) => { /* ... */ },
+  validate: async (sql) => {
+    // Custom validation logic
+    if (sql.includes('DROP')) {
+      throw new Error('DROP statements not allowed');
+    }
+  },
+  grounding: [tables()]
+});
+```
+
+## Performance Considerations
+
+### Introspection Performance
+
+Introspection speed varies by grounding:
+
+| Grounding | Speed | Notes |
+|-----------|-------|-------|
+| `tables()` | Fast | Basic metadata query |
+| `views()` | Fast | Basic metadata query |
+| `info()` | Fast | Single query |
+| `indexes()` | Fast | Single query |
+| `constraints()` | Fast | Single query |
+| `rowCount()` | Slow | Counts every table |
+| `columnStats()` | Slow | Scans every column |
+| `columnValues()` | Medium | Limited by `limit` parameter |
+
+### Caching
+
+Introspection results are automatically cached:
+
+```typescript
+// First call: introspects database
+const sql1 = await text2sql.toSql('query 1');
+
+// Subsequent calls: uses cache
+const sql2 = await text2sql.toSql('query 2');
+```
+
+Cache is keyed by `version` parameter:
+
+```typescript
+const text2sql = new Text2Sql({
+  version: 'v1',  // Change to invalidate cache
+  // ...
+});
+```
+
+### Manual Cache Control
+
+```typescript
+// Manually trigger introspection
+const fragments = await text2sql.index();
+
+// Clear cache by changing version
+const text2sqlV2 = new Text2Sql({
+  version: 'v2',  // New version
+  // ...
+});
+```
+
+## Adapter-Specific Features
+
+Each adapter has unique capabilities:
+
+### PostgreSQL
+- Full schema support
+- Advanced constraint introspection
+- Column statistics from `pg_stats`
+- Correlation and n_distinct metadata
+
+### SQLite
+- Embedded database (no network latency)
+- Simple constraint model
+- Fast introspection
+
+### SQL Server
+- Multiple schema support
+- Advanced index metadata
+- T-SQL dialect
+
+### MySQL
+- MariaDB compatibility
+- InnoDB and MyISAM support
+- Character set handling
+
+### BigQuery
+- Serverless execution
+- Dataset and table partitioning
+- Nested and repeated fields
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SQLite Adapter" icon="database" href="/text2sql/adapters/sqlite">
+    Setup and configuration for SQLite
+  </Card>
+  <Card title="PostgreSQL Adapter" icon="elephant" href="/text2sql/adapters/postgres">
+    Setup and configuration for PostgreSQL
+  </Card>
+  <Card title="Teachables" icon="graduation-cap" href="/text2sql/teachables">
+    Inject domain knowledge
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API documentation
+  </Card>
+</CardGroup>

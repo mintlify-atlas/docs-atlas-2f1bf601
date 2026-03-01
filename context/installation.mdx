@@ -1,0 +1,175 @@
+---
+title: 'Installation'
+description: 'Install and configure @deepagents/context in your project'
+---
+
+## Package Installation
+
+Install the package using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @deepagents/context
+```
+
+```bash pnpm
+pnpm add @deepagents/context
+```
+
+```bash yarn
+yarn add @deepagents/context
+```
+
+</CodeGroup>
+
+## Basic Import
+
+Import the functions and classes you need:
+
+```typescript
+import {
+  // Renderers
+  XmlRenderer,
+  MarkdownRenderer,
+  TomlRenderer,
+  ToonRenderer,
+  
+  // Domain fragments
+  term,
+  hint,
+  guardrail,
+  example,
+  workflow,
+  
+  // User fragments
+  identity,
+  persona,
+  preference,
+  
+  // Message fragments
+  user,
+  assistant,
+  reminder,
+} from '@deepagents/context';
+```
+
+## Browser Entry Point
+
+For browser environments, use the browser-specific export that excludes server-only modules:
+
+```typescript
+import {
+  identity,
+  reminder,
+  term,
+  user,
+  // ... other browser-compatible exports
+} from '@deepagents/context/browser';
+```
+
+<Warning>
+The browser entry point intentionally excludes:
+- Store implementations (SQLite, PostgreSQL, SQL Server)
+- Sandbox tooling
+- Filesystem-based skill loading
+- Stream persistence utilities
+</Warning>
+
+## Stream Persistence (Server-Only)
+
+If you need stream persistence, import the server-only modules:
+
+```typescript
+import {
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
+```
+
+<Note>
+Stream persistence requires Node.js and is not available in browser environments.
+</Note>
+
+## TypeScript Configuration
+
+The package includes TypeScript definitions out of the box. Ensure your `tsconfig.json` includes:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  }
+}
+```
+
+## Verify Installation
+
+Create a simple test file to verify the installation:
+
+```typescript test.ts
+import { XmlRenderer, term } from '@deepagents/context';
+
+const renderer = new XmlRenderer();
+const output = renderer.render([
+  term('API', 'Application Programming Interface'),
+]);
+
+console.log(output);
+```
+
+Run the test:
+
+```bash
+node --import tsx test.ts
+```
+
+Expected output:
+
+```xml
+<term>
+  <name>API</name>
+  <definition>Application Programming Interface</definition>
+</term>
+```
+
+## Dependencies
+
+The package has the following dependencies:
+
+<AccordionGroup>
+  <Accordion title="Core Dependencies">
+    - `ai` - Vercel AI SDK for streaming utilities
+    - `pluralize` - Pluralization for group rendering
+    - `stringcase` - Case conversion utilities
+    - `yaml` - YAML parsing (for skills)
+  </Accordion>
+  
+  <Accordion title="Optional Peer Dependencies">
+    - `pg` - PostgreSQL client (optional)
+    - `mssql` - SQL Server client (optional)
+    
+    Install only if you need database store implementations.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Fragments" icon="cube" href="/context/fragments">
+    Learn how to create and compose context fragments
+  </Card>
+  <Card title="Using Renderers" icon="code" href="/context/renderers">
+    Explore different output formats
+  </Card>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Add business logic and domain knowledge
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/context/api/fragment-builders">
+    Complete API documentation
+  </Card>
+</CardGroup>

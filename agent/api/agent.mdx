@@ -1,0 +1,375 @@
+---
+title: agent()
+description: API reference for the agent() function
+---
+
+The `agent()` function creates a new agent with specific capabilities, instructions, and configuration.
+
+## Function Signature
+
+```typescript agent.ts:52:56
+export function agent<Output, CIn = ContextVariables, COut = CIn>(
+  config: CreateAgent<Output, CIn, COut>,
+): Agent<Output, CIn, COut>
+```
+
+## Type Parameters
+
+<ParamField path="Output" type="type">
+  The type of structured output (if using output schema). Defaults to `unknown`.
+</ParamField>
+
+<ParamField path="CIn" type="type" default="ContextVariables">
+  Input context type - the shape of context this agent receives.
+</ParamField>
+
+<ParamField path="COut" type="type" default="CIn">
+  Output context type - the shape of context after this agent modifies it. Defaults to same as input.
+</ParamField>
+
+## Configuration
+
+### Required Parameters
+
+<ParamField path="name" type="string" required>
+  Unique identifier for the agent. Used in:
+  - Handoff tool names (`transfer_to_<name>`)
+  - Logging and debugging
+  - Agent identification in multi-agent systems
+  
+  Convention: Use snake_case for consistency.
+</ParamField>
+
+<ParamField path="model" type="LanguageModel" required>
+  AI model instance from any Vercel AI SDK provider.
+  
+  ```typescript
+  import { openai } from '@ai-sdk/openai';
+  import { anthropic } from '@ai-sdk/anthropic';
+  import { google } from '@ai-sdk/google';
+  
+  model: openai('gpt-4o')
+  model: anthropic('claude-sonnet-4-20250514')
+  model: google('gemini-1.5-pro')
+  ```
+</ParamField>
+
+<ParamField path="prompt" type="Instruction<CIn>" required>
+  Agent instructions. Can be:
+  - **String**: Simple static instructions
+  - **String array**: Multiple instruction lines (joined with newlines)
+  - **Function**: Dynamic instructions based on context `(ctx?: CIn) => string`
+  
+  ```typescript
+  // Static string
+  prompt: 'You are a helpful assistant.'
+  
+  // Array of strings
+  prompt: [
+    'You are a code reviewer.',
+    'Focus on best practices and security.',
+  ]
+  
+  // Dynamic function
+  prompt: (ctx) => `Help user ${ctx?.userId} with their request.`
+  
+  // Using instructions() helper
+  prompt: instructions({
+    purpose: ['You are a data analyst'],
+    routine: ['Analyze the data', 'Provide insights'],
+  })
+  ```
+</ParamField>
+
+### Optional Parameters
+
+<ParamField path="tools" type="ToolSet">
+  Tools available to the agent. Compatible with Vercel AI SDK tools.
+  
+  ```typescript
+  tools: {
+    search: tool({ /* ... */ }),
+    calculate: tool({ /* ... */ }),
+  }
+  ```
+</ParamField>
+
+<ParamField path="handoffs" type="Agent[]">
+  Specialized agents this agent can delegate to. Creates automatic `transfer_to_<agent_name>` tools.
+  
+  ```typescript
+  handoffs: [researchAgent, writerAgent]
+  ```
+</ParamField>
+
+<ParamField path="handoffDescription" type="string">
+  Description of what this agent does, used when it's a handoff target. Appears in the `transfer_to_<name>` tool description.
+  
+  ```typescript
+  handoffDescription: 'Handles research and fact-finding tasks'
+  ```
+</ParamField>
+
+<ParamField path="output" type="z.Schema<Output>">
+  Zod schema for structured output. Enables type-safe responses.
+  
+  ```typescript
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number(),
+  })
+  ```
+</ParamField>
+
+<ParamField path="toolChoice" type="ToolChoice" default="auto">
+  Controls when the agent uses tools:
+  - `'auto'` - Model decides when to use tools (default)
+  - `'none'` - Never use tools
+  - `'required'` - Always use at least one tool
+  
+  ```typescript
+  toolChoice: 'required'
+  ```
+</ParamField>
+
+<ParamField path="prepareHandoff" type="PrepareHandoffFn">
+  Function called before transferring to this agent. Used to modify messages or context.
+  
+  ```typescript
+  prepareHandoff: async (messages) => {
+    // Modify messages before agent takes over
+    console.log('Preparing handoff, message count:', messages.length);
+  }
+  ```
+</ParamField>
+
+<ParamField path="prepareEnd" type="PrepareEndFn<COut, Output>">
+  Function called after this agent finishes. Can return a new stream to continue execution.
+  
+  ```typescript
+  prepareEnd: async ({ messages, responseMessage, contextVariables }) => {
+    console.log('Agent finished');
+    // Optionally return StreamTextResult to continue
+  }
+  ```
+</ParamField>
+
+<ParamField path="providerOptions" type="object">
+  Provider-specific options passed to the model.
+  
+  ```typescript
+  providerOptions: {
+    openai: {
+      reasoningEffort: 'medium',
+    },
+  }
+  ```
+</ParamField>
+
+<ParamField path="logging" type="boolean" default="false">
+  Enable debug logging for this agent.
+  
+  ```typescript
+  logging: true
+  ```
+</ParamField>
+
+## Return Value
+
+Returns an `Agent` instance with the following properties and methods:
+
+### Properties
+
+<ResponseField name="model" type="LanguageModel">
+  The configured AI model.
+</ResponseField>
+
+<ResponseField name="internalName" type="string">
+  Snake-cased version of the agent name.
+</ResponseField>
+
+<ResponseField name="handoff" type="Handoff<CIn>">
+  Agent configuration including name, instructions, tools, and handoffDescription.
+</ResponseField>
+
+<ResponseField name="handoffToolName" type="transfer_tool">
+  The name of this agent's transfer tool: `transfer_to_<name>`.
+</ResponseField>
+
+### Methods
+
+<ResponseField name="instructions(ctx?)" type="(ctx?: CIn) => string">
+  Get the agent's instructions, optionally with context.
+  
+  ```typescript
+  const instructions = myAgent.instructions(context);
+  ```
+</ResponseField>
+
+<ResponseField name="toToolset()" type="() => ToolSet">
+  Get all tools available to this agent, including handoff tools.
+  
+  ```typescript
+  const tools = myAgent.toToolset();
+  ```
+</ResponseField>
+
+<ResponseField name="asTool()" type="(options?) => Tool">
+  Convert the agent to a tool that can be used by other agents.
+  
+  ```typescript
+  const analyzerTool = analyzer.asTool({
+    toolDescription: 'Analyze sentiment of text',
+    outputExtractor: async (result) => result.text,
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="toTool()" type="(options?) => ToolSet">
+  Same as `asTool()` but returns a ToolSet object with the tool.
+  
+  ```typescript
+  const { transfer_to_analyzer } = analyzer.toTool();
+  ```
+</ResponseField>
+
+<ResponseField name="clone()" type="(overrides?) => Agent">
+  Create a copy of the agent with optional property overrides.
+  
+  ```typescript
+  const cloned = myAgent.clone({
+    prompt: 'Different instructions',
+    tools: { newTool: someTool },
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="debug()" type="() => void">
+  Print debugging information about the agent (if logging is enabled).
+  
+  ```typescript
+  myAgent.debug();
+  // Debug: Agent: my_agent
+  // Debug: TransferTools: [researcher, writer]
+  // Debug: Agent Tools: [search, calculate]
+  ```
+</ResponseField>
+
+## Examples
+
+### Basic Agent
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent } from '@deepagents/agent';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant.',
+});
+```
+
+### Agent with Tools
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const weatherAgent = agent({
+  name: 'weather_agent',
+  model: openai('gpt-4o'),
+  prompt: 'Help users check the weather.',
+  tools: {
+    getWeather: tool({
+      description: 'Get weather for a location',
+      parameters: z.object({ location: z.string() }),
+      execute: async ({ location }) => {
+        return { temperature: 72, condition: 'sunny' };
+      },
+    }),
+  },
+});
+```
+
+### Agent with Structured Output
+
+```typescript
+import { z } from 'zod';
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze sentiment of text.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number().min(0).max(1),
+    keywords: z.array(z.string()),
+  }),
+});
+```
+
+### Agent with Context
+
+```typescript
+interface UserContext {
+  userId: string;
+  preferences: Record<string, string>;
+}
+
+const personalAgent = agent<unknown, UserContext>({
+  name: 'personal_assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    You are a personal assistant for user ${ctx?.userId}.
+    User preferences: ${JSON.stringify(ctx?.preferences)}
+  `,
+});
+```
+
+### Multi-Agent Coordinator
+
+```typescript
+import { instructions } from '@deepagents/agent';
+
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'Research topics thoroughly.',
+  handoffDescription: 'Handles research and fact-finding',
+});
+
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'Write clear, engaging content.',
+  handoffDescription: 'Handles content creation',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions.swarm({
+    purpose: ['Coordinate research and writing'],
+    routine: [
+      'Use transfer_to_researcher for fact-finding',
+      'Use transfer_to_writer for content creation',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="instructions()" icon="file-lines" href="/agent/api/instructions">
+    Helper for structured prompts
+  </Card>
+  <Card title="execute()" icon="play" href="/agent/api/execution">
+    Execute agents
+  </Card>
+  <Card title="Basic Agent Guide" icon="book" href="/agent/basic-agent">
+    Learn to create agents
+  </Card>
+</CardGroup>

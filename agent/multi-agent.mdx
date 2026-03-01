@@ -1,0 +1,451 @@
+---
+title: Multi-Agent Systems
+description: Build coordinated multi-agent systems with handoffs
+---
+
+Multi-agent systems enable specialized agents to collaborate on complex tasks by transferring control to each other. The agent framework implements this through **handoffs**.
+
+## How Handoffs Work
+
+When an agent has handoffs configured, the framework automatically creates `transfer_to_<agent_name>` tools that allow agents to delegate tasks to specialists.
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, swarm } from '@deepagents/agent';
+
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'You research topics and provide detailed information.',
+  handoffDescription: 'Handles research and fact-finding tasks',
+});
+
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'You write clear, engaging content based on research.',
+  handoffDescription: 'Handles writing and content creation',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: `
+    You coordinate research and writing tasks.
+    - Use transfer_to_researcher for fact-finding
+    - Use transfer_to_writer for content creation
+  `,
+  handoffs: [researcher, writer],
+});
+
+// The coordinator can now delegate to researcher and writer
+const stream = swarm(coordinator, 'Write a blog post about AI agents', {});
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.delta);
+  }
+}
+```
+
+## Handoff Configuration
+
+<ParamField path="handoffs" type="Agent[]">
+  Array of specialized agents this agent can delegate to.
+</ParamField>
+
+<ParamField path="handoffDescription" type="string">
+  Description of what this agent does. Used in the `transfer_to_<agent_name>` tool description.
+</ParamField>
+
+## Automatic Transfer Tools
+
+When you add handoffs, the framework creates transfer tools automatically:
+
+```typescript
+const coordinator = agent({
+  name: 'coordinator',
+  handoffs: [researcher, writer],
+  // ...
+});
+
+// Automatically creates:
+// - transfer_to_researcher() tool
+// - transfer_to_writer() tool
+```
+
+The agent can call these tools to transfer control:
+
+```typescript
+// Agent decides to use researcher
+Agent: "I need to gather information first."
+[Calls: transfer_to_researcher()]
+
+// Researcher takes over
+Researcher: "Let me research that topic..."
+[Performs research]
+
+// Returns to coordinator
+Coordinator: "Now I'll send this to the writer."
+[Calls: transfer_to_writer()]
+```
+
+## Structured Instructions for Multi-Agent
+
+Use `instructions.swarm()` for coordinator agents:
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions.swarm({
+    purpose: ['Coordinate research and writing tasks'],
+    routine: [
+      'Analyze the user request',
+      'Use transfer_to_researcher for fact-finding',
+      'Use transfer_to_writer for content creation',
+      'Review the final output',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+```
+
+This adds specialized prompting for multi-agent coordination and includes a placeholder for listing available agents.
+
+## Real-World Example: Research Bot
+
+From the source code examples:
+
+```typescript research_bot.ts:44:114
+import { openai } from '@ai-sdk/openai';
+import { agent, instructions, swarm, generate, execute } from '@deepagents/agent';
+import { z } from 'zod';
+
+const WebSearchPlanSchema = z.object({
+  searches: z.array(
+    z.object({
+      reason: z.string().describe('Why this search is important'),
+      query: z.string().describe('The search term to use'),
+    })
+  ),
+});
+
+const ReportDataSchema = z.object({
+  short_summary: z.string().describe('A short 2-3 sentence summary'),
+  markdown_report: z.string().describe('The final report'),
+  follow_up_questions: z.array(z.string()),
+});
+
+const planner = agent({
+  model: openai('gpt-4o'),
+  name: 'PlannerAgent',
+  output: WebSearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a research assistant. Given a query, come up with web searches to answer it.',
+    ],
+    routine: ['Output between 5 and 10 terms to query for.'],
+  }),
+});
+
+const research = agent({
+  model: openai('gpt-4o'),
+  name: 'ResearchAgent',
+  prompt: instructions({
+    purpose: [
+      'You are a research assistant. Search the web and produce a concise summary.',
+    ],
+    routine: [
+      'Capture the main points. Write succinctly.',
+      'This will be consumed by someone synthesizing a report.',
+    ],
+  }),
+  tools: {
+    web_search: openai.tools.webSearch({ searchContextSize: 'low' }),
+  },
+});
+
+const writer = agent({
+  name: 'WriterAgent',
+  model: openai('gpt-4o'),
+  output: ReportDataSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a senior researcher writing a cohesive report.',
+      'You will be provided with the query and initial research.',
+    ],
+    routine: [
+      'Come up with an outline for the report',
+      'Generate the report in markdown format',
+      'Aim for 5-10 pages, at least 1000 words',
+    ],
+  }),
+});
+
+// Workflow
+async function run(query: string) {
+  const plan = await generate(planner, `Query: ${query}`, {});
+  
+  const searchResults = await Promise.all(
+    plan.output.searches.map(async (item) => {
+      const result = await execute(research, `Search: ${item.query}`, {});
+      return await result.text;
+    })
+  );
+  
+  const report = await generate(
+    writer,
+    `Original query: ${query}\nSearch results: ${JSON.stringify(searchResults)}`,
+    {}
+  );
+  
+  return report.output;
+}
+```
+
+## Context Variables with Handoffs
+
+Context flows through all agents in a handoff chain:
+
+```typescript
+interface ProjectContext {
+  projectId: string;
+  budget: number;
+  deadline: Date;
+  requirements: string[];
+}
+
+const estimator = agent<unknown, ProjectContext>({
+  name: 'estimator',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    Estimate project costs. Budget limit: $${ctx?.budget}
+  `,
+  handoffDescription: 'Estimates project costs and timeline',
+});
+
+const planner = agent<unknown, ProjectContext>({
+  name: 'planner',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    Create project plan. Deadline: ${ctx?.deadline.toISOString()}
+  `,
+  handoffDescription: 'Creates detailed project plans',
+});
+
+const coordinator = agent<unknown, ProjectContext>({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: 'Coordinate project estimation and planning.',
+  handoffs: [estimator, planner],
+});
+
+const context: ProjectContext = {
+  projectId: 'proj-123',
+  budget: 50000,
+  deadline: new Date('2024-12-31'),
+  requirements: ['Feature A', 'Feature B'],
+};
+
+const stream = swarm(coordinator, 'Plan this project', context);
+```
+
+## Agent as Tool
+
+Convert an agent into a tool for use by other agents:
+
+```typescript
+import { agent, generate } from '@deepagents/agent';
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze sentiment of text.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number(),
+  }),
+});
+
+// Convert agent to tool
+const analyzerTool = analyzer.asTool({
+  toolDescription: 'Analyze sentiment of user messages',
+  outputExtractor: async (result) => {
+    return JSON.stringify(result.output);
+  },
+});
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant with sentiment analysis capability.',
+  tools: {
+    analyze_sentiment: analyzerTool,
+  },
+});
+```
+
+## Financial Analysis Example
+
+From the source code examples - a complex multi-agent workflow:
+
+```typescript finanicals_bot.ts:60:143
+import { groq } from '@ai-sdk/groq';
+import { agent, instructions, generate, execute } from '@deepagents/agent';
+import { z } from 'zod';
+
+const AnalysisSummarySchema = z.object({
+  summary: z.string().describe('Short analysis summary'),
+});
+
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      'You are a risk analyst looking for potential red flags.',
+      'Analyze risks like competitive threats, regulatory issues, supply chain problems.',
+    ],
+    routine: ['Keep it under 2 paragraphs.'],
+  }),
+});
+
+const financialsAgent = agent({
+  name: 'FundamentalsAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      'You are a financial analyst focused on company fundamentals.',
+      'Analyze revenue, profit, margins and growth trajectory.',
+    ],
+    routine: ['Pull out key metrics or quotes.', 'Keep it under 2 paragraphs.'],
+  }),
+});
+
+// Custom output extractor for sub-agents
+const summaryExtractor = async (result) => {
+  return result.output.summary;
+};
+
+const writerAgent = agent({
+  name: 'FinancialWriterAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: FinancialReportDataSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a senior financial analyst.',
+      'Synthesize research into a long-form markdown report.',
+    ],
+    routine: [
+      'You can call fundamentals_analysis and risk_analysis tools.',
+    ],
+  }),
+});
+
+// Add specialized agents as tools
+const fundamentalsTool = financialsAgent.asTool({
+  toolDescription: 'Get a short write-up of key financial metrics',
+  outputExtractor: summaryExtractor,
+});
+
+const riskTool = riskAgent.asTool({
+  toolDescription: 'Get a short write-up of potential red flags',
+  outputExtractor: summaryExtractor,
+});
+
+const writerWithTools = writerAgent.clone({
+  tools: {
+    fundamentals_analysis: fundamentalsTool,
+    risk_analysis: riskTool,
+  },
+});
+```
+
+## Supervisor Pattern
+
+For complex coordination, use the supervisor pattern:
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+
+const supervisor = agent({
+  name: 'supervisor',
+  model: openai('gpt-4o'),
+  prompt: instructions.supervisor({
+    purpose: [
+      'You are a supervisor coordinating multiple specialist agents.',
+      'Delegate tasks to the appropriate agent and review their work.',
+    ],
+    routine: [
+      'Analyze the user request',
+      'Break it into subtasks',
+      'Delegate each subtask to the right specialist',
+      'Review and synthesize the results',
+    ],
+  }),
+  handoffs: [specialist1, specialist2, specialist3],
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clear Handoff Descriptions">
+    Write clear `handoffDescription` for each agent:
+    
+    ```typescript
+    agent({
+      name: 'researcher',
+      handoffDescription: 'Handles research tasks, fact-finding, and web searches',
+      // ...
+    })
+    ```
+  </Accordion>
+  
+  <Accordion title="Explicit Coordination Instructions">
+    Tell the coordinator when to use each agent:
+    
+    ```typescript
+    prompt: `
+      Use transfer_to_researcher when: user needs facts or data
+      Use transfer_to_writer when: research is complete and content needs to be written
+      Use transfer_to_editor when: content is drafted and needs review
+    `
+    ```
+  </Accordion>
+  
+  <Accordion title="Limit Handoff Depth">
+    Avoid deeply nested handoffs (agent → agent → agent → agent). Instead, have specialists return to a central coordinator.
+  </Accordion>
+  
+  <Accordion title="Use swarm() for Handoffs">
+    Always use `swarm()` instead of `execute()` when working with agents that have handoffs:
+    
+    ```typescript
+    // ✅ Correct
+    const stream = swarm(coordinator, message, context);
+    
+    // ❌ May not handle handoffs properly
+    const stream = execute(coordinator, message, context);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Structured Output" icon="code" href="/agent/structured-output">
+    Get type-safe structured responses
+  </Card>
+  <Card title="Context Variables" icon="share-nodes" href="/agent/context-variables">
+    Share state between agents
+  </Card>
+  <Card title="Streaming" icon="water" href="/agent/streaming">
+    Stream agent responses
+  </Card>
+</CardGroup>

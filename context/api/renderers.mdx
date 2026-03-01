@@ -1,0 +1,761 @@
+---
+title: 'Renderers API'
+description: 'Complete API reference for renderer classes'
+---
+
+## Overview
+
+Renderers transform context fragments into different output formats. All renderers extend the abstract `ContextRenderer` base class and implement the same interface.
+
+## Base Class
+
+### ContextRenderer
+
+Abstract base class implementing the Template Method pattern.
+
+```typescript
+abstract class ContextRenderer {
+  protected options: RendererOptions;
+  
+  constructor(options?: RendererOptions);
+  
+  abstract render(fragments: ContextFragment[]): string;
+  
+  protected abstract renderFragment(
+    fragment: ContextFragment,
+    ctx: RenderContext
+  ): string;
+  
+  protected abstract renderPrimitive(
+    key: string,
+    value: string,
+    ctx: RenderContext
+  ): string;
+  
+  protected abstract renderArray(
+    key: string,
+    items: FragmentData[],
+    ctx: RenderContext
+  ): string;
+  
+  protected abstract renderObject(
+    key: string,
+    obj: FragmentObject,
+    ctx: RenderContext
+  ): string;
+}
+```
+
+### RendererOptions
+
+```typescript
+interface RendererOptions {
+  /**
+   * When true, fragments with the same name are grouped under
+   * a pluralized parent tag.
+   */
+  groupFragments?: boolean;
+}
+```
+
+**Example:**
+```typescript
+const renderer = new XmlRenderer({ groupFragments: true });
+
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  term('SDK', 'Software Development Kit'),
+];
+
+// With groupFragments: true
+// <terms>
+//   <term>...</term>
+//   <term>...</term>
+// </terms>
+
+// With groupFragments: false (default)
+// <term>...</term>
+// <term>...</term>
+```
+
+### RenderContext
+
+```typescript
+interface RenderContext {
+  depth: number;   // Current nesting depth
+  path: string[];  // Path through the fragment tree
+}
+```
+
+## XmlRenderer
+
+Renders fragments as XML with proper nesting, escaping, and indentation.
+
+### Constructor
+
+```typescript
+class XmlRenderer extends ContextRenderer {
+  constructor(options?: RendererOptions)
+}
+```
+
+### render()
+
+```typescript
+render(fragments: ContextFragment[]): string
+```
+
+**Parameters:**
+- `fragments` - Array of context fragments to render
+
+**Returns:**
+- XML string with 2-space indentation
+
+**Example:**
+```typescript
+import { XmlRenderer, term, hint } from '@deepagents/context';
+
+const renderer = new XmlRenderer();
+const output = renderer.render([
+  term('API', 'Application Programming Interface'),
+  hint('Always validate input'),
+]);
+
+console.log(output);
+// <term>
+//   <name>API</name>
+//   <definition>Application Programming Interface</definition>
+// </term>
+// <hint>Always validate input</hint>
+```
+
+### Features
+
+<AccordionGroup>
+  <Accordion title="XML Escaping">
+    Automatically escapes special characters:
+    
+    | Character | Escaped |
+    |-----------|----------|
+    | `&` | `&amp;` |
+    | `<` | `&lt;` |
+    | `>` | `&gt;` |
+    | `"` | `&quot;` |
+    | `'` | `&apos;` |
+    
+    ```typescript
+    const frag = term('Example', 'Use <tags> & "quotes"');
+    const renderer = new XmlRenderer();
+    console.log(renderer.render([frag]));
+    // <term>
+    //   <name>Example</name>
+    //   <definition>Use &lt;tags&gt; &amp; &quot;quotes&quot;</definition>
+    // </term>
+    ```
+  </Accordion>
+  
+  <Accordion title="Array Handling">
+    Arrays are singularized and wrapped:
+    
+    ```typescript
+    const frag = workflow({
+      task: 'Analysis',
+      steps: ['Load', 'Process', 'Report'],
+    });
+    
+    // Output:
+    // <workflow>
+    //   <task>Analysis</task>
+    //   <steps>
+    //     <step>Load</step>
+    //     <step>Process</step>
+    //     <step>Report</step>
+    //   </steps>
+    // </workflow>
+    ```
+  </Accordion>
+  
+  <Accordion title="Nested Objects">
+    Objects are recursively rendered:
+    
+    ```typescript
+    const frag = {
+      name: 'config',
+      data: {
+        database: {
+          host: 'localhost',
+          port: 5432,
+        },
+      },
+    };
+    
+    // Output:
+    // <config>
+    //   <database>
+    //     <host>localhost</host>
+    //     <port>5432</port>
+    //   </database>
+    // </config>
+    ```
+  </Accordion>
+  
+  <Accordion title="Multiline Text">
+    Multiline values are indented:
+    
+    ```typescript
+    const frag = hint(`Rules:
+    1. Validate
+    2. Process
+    3. Log`);
+    
+    // Output:
+    // <hint>
+    //   Rules:
+    //   1. Validate
+    //   2. Process
+    //   3. Log
+    // </hint>
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## MarkdownRenderer
+
+Renders fragments as human-readable Markdown with bullet points and headers.
+
+### Constructor
+
+```typescript
+class MarkdownRenderer extends ContextRenderer {
+  constructor(options?: RendererOptions)
+}
+```
+
+### render()
+
+```typescript
+render(fragments: ContextFragment[]): string
+```
+
+**Parameters:**
+- `fragments` - Array of context fragments to render
+
+**Returns:**
+- Markdown string with headers and bullet points
+
+**Example:**
+```typescript
+import { MarkdownRenderer, styleGuide } from '@deepagents/context';
+
+const renderer = new MarkdownRenderer();
+const output = renderer.render([
+  styleGuide({
+    prefer: 'CTEs for readability',
+    never: 'Deep subquery nesting',
+    always: 'Use meaningful aliases',
+  }),
+]);
+
+console.log(output);
+// ## Style Guide
+//
+// - **prefer**: CTEs for readability
+// - **never**: Deep subquery nesting
+// - **always**: Use meaningful aliases
+```
+
+### Features
+
+<AccordionGroup>
+  <Accordion title="Headers">
+    Top-level fragments use `##` headers:
+    
+    ```markdown
+    ## Term
+    
+    - **name**: API
+    - **definition**: Application Programming Interface
+    ```
+  </Accordion>
+  
+  <Accordion title="Bullet Lists">
+    Nested structures use indented bullet points:
+    
+    ```markdown
+    ## Workflow
+    
+    - **task**: Customer Analysis
+    - **steps**:
+      - Segment customers
+      - Calculate metrics
+      - Identify trends
+    ```
+  </Accordion>
+  
+  <Accordion title="Title Casing">
+    Fragment names are automatically title-cased:
+    
+    ```typescript
+    { name: 'styleGuide', data: { ... } }
+    // Renders as:
+    // ## Style Guide
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## TomlRenderer
+
+Renders fragments as TOML-like configuration format.
+
+### Constructor
+
+```typescript
+class TomlRenderer extends ContextRenderer {
+  constructor(options?: RendererOptions)
+}
+```
+
+### render()
+
+```typescript
+render(fragments: ContextFragment[]): string
+```
+
+**Parameters:**
+- `fragments` - Array of context fragments to render
+
+**Returns:**
+- TOML-formatted string
+
+**Example:**
+```typescript
+import { TomlRenderer, styleGuide } from '@deepagents/context';
+
+const renderer = new TomlRenderer();
+const output = renderer.render([
+  styleGuide({
+    prefer: 'CTEs',
+    never: 'subqueries',
+  }),
+]);
+
+console.log(output);
+// [styleGuide]
+// prefer = "CTEs"
+// never = "subqueries"
+```
+
+### Features
+
+<AccordionGroup>
+  <Accordion title="Section Headers">
+    Top-level fragments become sections:
+    
+    ```toml
+    [database]
+    host = "localhost"
+    port = 5432
+    ```
+  </Accordion>
+  
+  <Accordion title="Nested Sections">
+    Nested objects use dotted notation:
+    
+    ```toml
+    [database.settings]
+    timeout = 30
+    retry = true
+    ```
+  </Accordion>
+  
+  <Accordion title="Arrays">
+    Arrays use inline format:
+    
+    ```toml
+    [workflow]
+    task = "Analysis"
+    steps = ["Load", "Process", "Report"]
+    ```
+  </Accordion>
+  
+  <Accordion title="Type Preservation">
+    Preserves types in output:
+    
+    ```toml
+    string_value = "text"
+    number_value = 42
+    boolean_value = true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## ToonRenderer
+
+Renders fragments as Token-Oriented Object Notation (TOON), a compact format optimized for token efficiency.
+
+### Constructor
+
+```typescript
+class ToonRenderer extends ContextRenderer {
+  constructor(options?: RendererOptions)
+}
+```
+
+### render()
+
+```typescript
+render(fragments: ContextFragment[]): string
+```
+
+**Parameters:**
+- `fragments` - Array of context fragments to render
+
+**Returns:**
+- TOON-formatted string
+
+**Example:**
+```typescript
+import { ToonRenderer, styleGuide } from '@deepagents/context';
+
+const renderer = new ToonRenderer();
+const output = renderer.render([
+  styleGuide({
+    prefer: 'CTEs',
+    never: 'subqueries',
+  }),
+]);
+
+console.log(output);
+// styleGuide:
+//   prefer: CTEs
+//   never: subqueries
+```
+
+### Features
+
+<AccordionGroup>
+  <Accordion title="YAML-like Hierarchy">
+    Uses indentation for structure:
+    
+    ```yaml
+    workflow:
+      task: Analysis
+      steps[3]:
+        - Load data
+        - Process
+        - Report
+    ```
+  </Accordion>
+  
+  <Accordion title="Primitive Arrays">
+    Compact comma-separated format:
+    
+    ```yaml
+    tags[3]: typescript,nodejs,ai
+    ```
+  </Accordion>
+  
+  <Accordion title="Tabular Arrays">
+    Uniform object arrays as CSV tables:
+    
+    ```yaml
+    products[3]{id,name,price}:
+      1,Widget,19.99
+      2,Gadget,29.99
+      3,Doohickey,39.99
+    ```
+    
+    Format: `name[length]{fields}:`
+  </Accordion>
+  
+  <Accordion title="Automatic Quoting">
+    Only quotes when necessary:
+    
+    ```yaml
+    simple: text
+    quoted: "text with: special chars"
+    number: 42
+    boolean: true
+    ```
+  </Accordion>
+  
+  <Accordion title="Null Handling">
+    Represents null explicitly:
+    
+    ```yaml
+    value: null
+    missing: null
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### TOON Format Specification
+
+<Tabs>
+  <Tab title="Primitives">
+    ```yaml
+    # Strings
+    unquoted: simple text
+    quoted: "text with: colons"
+    
+    # Numbers
+    integer: 42
+    decimal: 3.14
+    
+    # Booleans
+    flag: true
+    disabled: false
+    
+    # Null
+    empty: null
+    ```
+  </Tab>
+  
+  <Tab title="Objects">
+    ```yaml
+    # Nested objects
+    config:
+      database:
+        host: localhost
+        port: 5432
+    ```
+  </Tab>
+  
+  <Tab title="Arrays">
+    ```yaml
+    # Primitive array
+    tags[3]: a,b,c
+    
+    # Mixed array (list syntax)
+    items[3]:
+      - first
+      - second
+      - third
+    
+    # Tabular array (CSV syntax)
+    users[2]{id,name}:
+      1,Alice
+      2,Bob
+    ```
+  </Tab>
+  
+  <Tab title="Complex">
+    ```yaml
+    workflow:
+      task: Analysis
+      steps[3]:
+        - Load data
+        - Process data
+        - Generate report
+      config:
+        parallel: true
+        timeout: 300
+    ```
+  </Tab>
+</Tabs>
+
+## Utility Methods
+
+### sanitizeFragments()
+
+Remove null/undefined values recursively.
+
+```typescript
+protected sanitizeFragments(
+  fragments: ContextFragment[]
+): ContextFragment[]
+```
+
+**Example:**
+```typescript
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  { name: 'empty', data: null },  // Will be removed
+  guardrail({ rule: 'No PII', reason: undefined }),  // reason will be omitted
+];
+
+const sanitized = renderer.sanitizeFragments(fragments);
+// Only non-null fragments with non-null fields remain
+```
+
+### groupByName()
+
+Group fragments by name.
+
+```typescript
+protected groupByName(
+  fragments: ContextFragment[]
+): Map<string, ContextFragment[]>
+```
+
+**Example:**
+```typescript
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  term('SDK', 'Software Development Kit'),
+  hint('Validate input'),
+];
+
+const groups = renderer.groupByName(fragments);
+// Map {
+//   'term' => [term1, term2],
+//   'hint' => [hint1]
+// }
+```
+
+### isPrimitive()
+
+Check if data is a primitive value.
+
+```typescript
+protected isPrimitive(
+  data: FragmentData
+): data is string | number | boolean
+```
+
+**Example:**
+```typescript
+if (renderer.isPrimitive(fragment.data)) {
+  // data is string, number, or boolean
+}
+```
+
+## Custom Renderers
+
+Create custom renderers by extending `ContextRenderer`:
+
+```typescript
+import {
+  ContextRenderer,
+  type ContextFragment,
+  type RenderContext,
+  type FragmentData,
+  type FragmentObject,
+} from '@deepagents/context';
+
+class JsonRenderer extends ContextRenderer {
+  render(fragments: ContextFragment[]): string {
+    const sanitized = this.sanitizeFragments(fragments);
+    return JSON.stringify(sanitized, null, 2);
+  }
+  
+  protected renderFragment(
+    fragment: ContextFragment,
+    ctx: RenderContext
+  ): string {
+    return JSON.stringify(fragment);
+  }
+  
+  protected renderPrimitive(
+    key: string,
+    value: string,
+    ctx: RenderContext
+  ): string {
+    return JSON.stringify({ [key]: value });
+  }
+  
+  protected renderArray(
+    key: string,
+    items: FragmentData[],
+    ctx: RenderContext
+  ): string {
+    return JSON.stringify({ [key]: items });
+  }
+  
+  protected renderObject(
+    key: string,
+    obj: FragmentObject,
+    ctx: RenderContext
+  ): string {
+    return JSON.stringify({ [key]: obj });
+  }
+}
+
+// Usage
+const renderer = new JsonRenderer();
+const output = renderer.render([term('API', 'Application Programming Interface')]);
+```
+
+## Render Helper
+
+Convenience function for quick XML rendering:
+
+```typescript
+function render(tag: string, ...fragments: ContextFragment[]): string
+```
+
+**Parameters:**
+- `tag` - Parent tag name
+- `fragments` - Fragments to render
+
+**Returns:**
+- XML string with fragments wrapped in parent tag
+
+**Example:**
+```typescript
+import { render, term, hint } from '@deepagents/context';
+
+const xml = render(
+  'instructions',
+  term('API', 'Application Programming Interface'),
+  hint('Always validate input'),
+);
+
+console.log(xml);
+// <instructions>
+//   <term>
+//     <name>API</name>
+//     <definition>Application Programming Interface</definition>
+//   </term>
+//   <hint>Always validate input</hint>
+// </instructions>
+```
+
+## Choosing a Renderer
+
+<Steps>
+  <Step title="XmlRenderer">
+    Best for models that prefer structured XML (e.g., Claude)
+    - Hierarchical structure
+    - Proper escaping
+    - 2-space indentation
+  </Step>
+  
+  <Step title="MarkdownRenderer">
+    Best for human-readable output
+    - Headers and bullet points
+    - Natural reading flow
+    - Good for documentation
+  </Step>
+  
+  <Step title="TomlRenderer">
+    Best for configuration-style data
+    - Section-based structure
+    - Type preservation
+    - Between XML and YAML complexity
+  </Step>
+  
+  <Step title="ToonRenderer">
+    Best for token efficiency
+    - Minimal delimiters
+    - Tabular arrays (CSV)
+    - Compact representation
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Fragment Builders" icon="cube" href="/context/api/fragment-builders">
+    Complete fragment builder API reference
+  </Card>
+  <Card title="StreamStore API" icon="database" href="/context/api/stream-store">
+    Complete stream storage API reference
+  </Card>
+  <Card title="Renderers Guide" icon="code" href="/context/renderers">
+    Learn about using renderers
+  </Card>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Learn about domain fragments
+  </Card>
+</CardGroup>

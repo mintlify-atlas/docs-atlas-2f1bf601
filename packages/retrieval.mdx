@@ -1,0 +1,462 @@
+---
+title: '@deepagents/retrieval'
+description: 'Local-first RAG with vector embeddings and semantic search'
+---
+
+## Overview
+
+The `@deepagents/retrieval` package provides a local-first RAG (Retrieval-Augmented Generation) system. It ingests content from various sources, creates vector embeddings using FastEmbed, and enables semantic search over documents.
+
+## Installation
+
+```bash
+npm install @deepagents/retrieval
+```
+
+**Built-in Features:**
+- FastEmbed for local embeddings (no API keys required)
+- SQLite-vec for vector storage
+- Multiple connectors (GitHub, RSS, PDF, local files)
+- Markdown and text chunking
+
+## Quick Example
+
+```typescript
+import {
+  FastEmbed,
+  SqliteStore,
+  ingest,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { githubConnector } from '@deepagents/retrieval/connectors';
+
+const embedder = new FastEmbed();
+const store = new SqliteStore('./vectors.db');
+
+// Ingest documentation
+await ingest({
+  connector: githubConnector({
+    owner: 'JanuaryLabs',
+    repo: 'deepagents',
+    path: 'packages',
+  }),
+  store,
+  embedder,
+});
+
+// Semantic search
+const results = await similaritySearch({
+  query: 'How do agent handoffs work?',
+  store,
+  embedder,
+  limit: 5,
+});
+
+for (const result of results) {
+  console.log('Content:', result.content);
+  console.log('Similarity:', result.similarity);
+  console.log('Metadata:', result.metadata);
+  console.log('---');
+}
+```
+
+## Core API
+
+### `ingest(config)`
+
+Ingest content and create embeddings:
+
+```typescript
+interface IngestConfig {
+  connector: Connector;     // Content source
+  store: VectorStore;       // Storage backend
+  embedder: Embedder;       // Embedding model
+  chunkSize?: number;       // Chunk size (default: 512)
+  chunkOverlap?: number;    // Overlap (default: 50)
+}
+
+await ingest({
+  connector: localFilesConnector('./docs'),
+  store: sqliteStore,
+  embedder: fastEmbed,
+  chunkSize: 1000,
+  chunkOverlap: 100,
+});
+```
+
+### `similaritySearch(config)`
+
+Search for similar documents:
+
+```typescript
+interface SearchConfig {
+  query: string;           // Search query
+  store: VectorStore;      // Vector store
+  embedder: Embedder;      // Embedding model
+  limit?: number;          // Results (default: 10)
+  threshold?: number;      // Min similarity (0-1)
+}
+
+const results = await similaritySearch({
+  query: 'authentication best practices',
+  store,
+  embedder,
+  limit: 3,
+  threshold: 0.7,
+});
+```
+
+**Returns:**
+
+```typescript
+interface SearchResult {
+  id: string;
+  content: string;
+  similarity: number;      // 0-1 (higher = more similar)
+  metadata: Record<string, any>;
+}
+```
+
+## Embedders
+
+### FastEmbed
+
+Local embedding generation (no API required):
+
+```typescript
+import { FastEmbed } from '@deepagents/retrieval';
+
+const embedder = new FastEmbed({
+  model: 'BAAI/bge-small-en-v1.5', // Default
+});
+
+// Embed text
+const vector = await embedder.embed('Your text here');
+console.log(vector.length); // 384 dimensions
+
+// Batch embedding
+const vectors = await embedder.embedBatch([
+  'First document',
+  'Second document',
+  'Third document',
+]);
+```
+
+**Available Models:**
+- `BAAI/bge-small-en-v1.5` (default, 384 dims)
+- `BAAI/bge-base-en-v1.5` (768 dims)
+- `sentence-transformers/all-MiniLM-L6-v2` (384 dims)
+
+<Note>
+FastEmbed runs locally and doesn't require API keys or internet access after initial model download.
+</Note>
+
+## Vector Stores
+
+### SqliteStore
+
+SQLite-based vector storage with SQLite-vec extension:
+
+```typescript
+import { SqliteStore } from '@deepagents/retrieval';
+
+const store = new SqliteStore('./vectors.db');
+
+// Insert vectors
+await store.insert({
+  id: 'doc1',
+  vector: [0.1, 0.2, 0.3, ...],
+  content: 'Document text',
+  metadata: { source: 'github', path: 'README.md' },
+});
+
+// Search
+const results = await store.search(queryVector, { limit: 10 });
+
+// Delete
+await store.delete('doc1');
+
+// Close
+store.close();
+```
+
+### NodeSqliteStore
+
+Node.js-specific SQLite implementation:
+
+```typescript
+import { NodeSqliteStore } from '@deepagents/retrieval';
+
+const store = new NodeSqliteStore('./vectors.db');
+```
+
+## Connectors
+
+Content sources for ingestion.
+
+### GitHub Connector
+
+Ingest from GitHub repositories:
+
+```typescript
+import { githubConnector } from '@deepagents/retrieval/connectors';
+
+const connector = githubConnector({
+  owner: 'JanuaryLabs',
+  repo: 'deepagents',
+  path: 'packages/agent', // Optional: specific path
+  branch: 'main',          // Optional: branch
+  token: process.env.GITHUB_TOKEN, // Optional: for private repos
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### Local Files Connector
+
+Ingest local files:
+
+```typescript
+import { localFilesConnector } from '@deepagents/retrieval/connectors';
+
+const connector = localFilesConnector('./docs', {
+  extensions: ['.md', '.txt', '.mdx'],
+  ignore: ['node_modules', '.git'],
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### PDF Connector
+
+Extract and ingest PDF documents:
+
+```typescript
+import { pdfConnector } from '@deepagents/retrieval/connectors';
+
+const connector = pdfConnector('./documents/*.pdf');
+await ingest({ connector, store, embedder });
+```
+
+### RSS Connector
+
+Ingest from RSS feeds:
+
+```typescript
+import { rssConnector } from '@deepagents/retrieval/connectors';
+
+const connector = rssConnector('https://blog.example.com/rss');
+await ingest({ connector, store, embedder });
+```
+
+### Linear Connector
+
+Ingest Linear issues:
+
+```typescript
+import { linearConnector } from '@deepagents/retrieval/connectors';
+
+const connector = linearConnector({
+  apiKey: process.env.LINEAR_API_KEY,
+  teamId: 'team_123',
+});
+
+await ingest({ connector, store, embedder });
+```
+
+## Chunking Strategies
+
+### Markdown Splitter
+
+Split by markdown structure:
+
+```typescript
+import { MarkdownTextSplitter } from '@deepagents/retrieval';
+
+const splitter = new MarkdownTextSplitter({
+  chunkSize: 1000,
+  chunkOverlap: 100,
+});
+
+const chunks = await splitter.split(markdownText);
+```
+
+### Recursive Character Splitter
+
+General-purpose text splitting:
+
+```typescript
+import { RecursiveCharacterTextSplitter } from '@deepagents/retrieval';
+
+const splitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 500,
+  chunkOverlap: 50,
+  separators: ['\n\n', '\n', '. ', ' '],
+});
+
+const chunks = await splitter.split(text);
+```
+
+## Complete Example
+
+### RAG-Powered Agent
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import { tool } from 'ai';
+import { z } from 'zod';
+import {
+  FastEmbed,
+  SqliteStore,
+  ingest,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { githubConnector } from '@deepagents/retrieval/connectors';
+
+// Setup
+const embedder = new FastEmbed();
+const store = new SqliteStore('./kb.db');
+
+// Ingest documentation once
+await ingest({
+  connector: githubConnector({
+    owner: 'JanuaryLabs',
+    repo: 'deepagents',
+  }),
+  store,
+  embedder,
+});
+
+// Create search tool
+const searchTool = tool({
+  description: 'Search the knowledge base',
+  parameters: z.object({
+    query: z.string().describe('Search query'),
+  }),
+  execute: async ({ query }) => {
+    const results = await similaritySearch({
+      query,
+      store,
+      embedder,
+      limit: 3,
+    });
+    
+    return results.map(r => ({
+      content: r.content,
+      similarity: r.similarity,
+    }));
+  },
+});
+
+// Create RAG agent
+const ragAgent = agent({
+  name: 'rag_agent',
+  model: openai('gpt-4o'),
+  prompt: 'You answer questions using the knowledge base. Always search first.',
+  tools: { search: searchTool },
+});
+
+// Query
+const stream = execute(
+  ragAgent,
+  'How do I create an agent with handoffs?',
+  {}
+);
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Advanced Usage
+
+### Custom Content ID
+
+Generate unique IDs for content:
+
+```typescript
+import { contentId } from '@deepagents/retrieval';
+
+const id = contentId('https://example.com/page', 'Page content');
+console.log(id); // Hash-based ID
+```
+
+### Metadata Filtering
+
+Filter search results by metadata:
+
+```typescript
+const results = await store.search(queryVector, {
+  limit: 10,
+  filter: (metadata) => {
+    return metadata.source === 'github' && metadata.language === 'typescript';
+  },
+});
+```
+
+### Incremental Updates
+
+Update specific documents:
+
+```typescript
+// Delete old version
+await store.delete('doc1');
+
+// Insert new version
+const vector = await embedder.embed(newContent);
+await store.insert({
+  id: 'doc1',
+  vector,
+  content: newContent,
+  metadata: { updated: new Date().toISOString() },
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Chunk Size" icon="scissors">
+    Use 500-1000 characters for semantic coherence
+  </Card>
+  <Card title="Overlap" icon="layer-group">
+    10-20% overlap preserves context across chunks
+  </Card>
+  <Card title="Metadata" icon="tags">
+    Include source, date, author for filtering
+  </Card>
+  <Card title="Reranking" icon="arrow-down-wide-short">
+    Use top 10-20 results, rerank with LLM if needed
+  </Card>
+  <Card title="Updates" icon="arrows-rotate">
+    Reingest changed content periodically
+  </Card>
+  <Card title="Similarity Threshold" icon="sliders">
+    Start with 0.7, adjust based on results
+  </Card>
+</CardGroup>
+
+## Performance Tips
+
+- **Batch Embeddings**: Use `embedBatch()` for multiple texts
+- **Index Size**: SQLite-vec handles millions of vectors efficiently
+- **Search Limit**: Keep under 20 for fast results
+- **Chunking**: Smaller chunks = more granular search, larger = more context
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/retrieval](https://www.npmjs.com/package/@deepagents/retrieval)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Build RAG-powered agents
+  </Card>
+  <Card title="@deepagents/toolbox" icon="toolbox" href="/packages/toolbox">
+    Use retrieval in agent tools
+  </Card>
+</CardGroup>

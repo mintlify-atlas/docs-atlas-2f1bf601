@@ -1,0 +1,547 @@
+---
+title: PostgreSQL Adapter
+description: Setup and configuration for PostgreSQL databases
+---
+
+# PostgreSQL Adapter
+
+The PostgreSQL adapter provides comprehensive support for PostgreSQL databases with advanced features like schemas, detailed statistics, and constraint introspection.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+npm install pg
+npm install -D @types/pg
+```
+
+## Basic Usage
+
+```typescript
+import { Postgres, tables, views, info, indexes, constraints } from '@deepagents/text2sql/postgres';
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  host: 'localhost',
+  database: 'mydb',
+  user: 'postgres',
+  password: 'password'
+});
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints()
+  ]
+});
+```
+
+## Configuration Options
+
+```typescript
+interface PostgresAdapterOptions {
+  // Required: Function to execute SQL queries
+  execute: ExecuteFunction;
+  
+  // Optional: Custom validation function
+  validate?: ValidateFunction;
+  
+  // Required: Grounding functions
+  grounding: GroundingFn[];
+  
+  // Optional: Limit introspection to specific schemas
+  schemas?: string[];
+}
+```
+
+### Execute Function
+
+#### Using pg (node-postgres)
+
+```typescript
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [tables()]
+});
+```
+
+#### Using pg with connection string
+
+```typescript
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const client = new pg.Client({
+      connectionString: 'postgresql://user:pass@localhost:5432/dbname'
+    });
+    await client.connect();
+    try {
+      const result = await client.query(sql);
+      return result.rows;
+    } finally {
+      await client.end();
+    }
+  },
+  grounding: [tables()]
+});
+```
+
+### Schema Filtering
+
+Limit introspection to specific schemas:
+
+```typescript
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [tables(), constraints()],
+  schemas: ['public', 'analytics']  // Only these schemas
+});
+```
+
+Without `schemas`, system schemas are excluded automatically:
+- `pg_catalog`
+- `information_schema`
+
+## Grounding Functions
+
+All PostgreSQL grounding functions:
+
+```typescript
+import {
+  tables,        // Tables, columns, data types
+  views,         // Database views
+  info,          // PostgreSQL version and metadata
+  indexes,       // Index information (btree, hash, gin, gist)
+  constraints,   // PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK
+  rowCount,      // Table row counts
+  columnStats,   // Min/max/null/correlation from pg_stats
+  columnValues   // Distinct values for enums
+} from '@deepagents/text2sql/postgres';
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints(),
+    rowCount(),
+    columnStats(),
+    columnValues({ limit: 20 })
+  ]
+});
+```
+
+## PostgreSQL-Specific Features
+
+### Schema Support
+
+PostgreSQL organizes tables into schemas:
+
+```typescript
+// Tables are qualified with schema
+const sql = 'SELECT * FROM public.customers';
+
+// Cross-schema joins
+const sql2 = `
+  SELECT * 
+  FROM public.customers 
+  JOIN analytics.events ON customers.id = events.customer_id
+`;
+```
+
+### Identifier Quoting
+
+PostgreSQL uses double quotes:
+
+```typescript
+adapter.quoteIdentifier('my_table');    // "my_table"
+adapter.quoteIdentifier('public');      // "public"
+adapter.quoteIdentifier('My Column');   // "My Column"
+```
+
+### String Escaping
+
+PostgreSQL escapes single quotes by doubling:
+
+```typescript
+adapter.escape("O'Reilly");  // O''Reilly
+```
+
+### LIMIT Clause
+
+```typescript
+SELECT * FROM customers LIMIT 10
+```
+
+### Advanced Statistics
+
+PostgreSQL provides rich column statistics from `pg_stats`:
+
+```typescript
+import { columnStats } from '@deepagents/text2sql/postgres';
+
+const adapter = new Postgres({
+  // ...
+  grounding: [
+    tables(),
+    columnStats()  // Includes correlation, n_distinct, and more
+  ]
+});
+```
+
+Statistics include:
+- **correlation** - Physical row order correlation with logical sort order
+- **n_distinct** - Estimated number of distinct values
+- **null_frac** - Fraction of NULL values
+- **min/max** - Minimum and maximum values
+
+## Error Handling
+
+PostgreSQL errors are classified by error code:
+
+```typescript
+try {
+  const sql = await text2sql.toSql('Show me invalid_table');
+} catch (error) {
+  console.error(error);
+}
+```
+
+Error types:
+
+| Error Code | Type | Suggestion |
+|------------|------|------------|
+| 42P01 | MISSING_TABLE | Check the database schema for the correct table name |
+| 42703 | INVALID_COLUMN | Verify the column exists and use table aliases |
+| 42601 | SYNTAX_ERROR | Review keywords, punctuation, and query shape |
+| 42P10 | INVALID_COLUMN | Columns in GROUP BY/SELECT must exist |
+| 42883 | INVALID_FUNCTION | Function or operator not recognized |
+
+## Complete Example
+
+```typescript postgres-example.ts
+import { Text2Sql } from '@deepagents/text2sql';
+import { 
+  Postgres, 
+  tables, 
+  views, 
+  info, 
+  indexes, 
+  constraints 
+} from '@deepagents/text2sql/postgres';
+import { InMemoryContextStore, term, hint } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import pg from 'pg';
+
+// Create connection pool
+const pool = new pg.Pool({
+  host: 'localhost',
+  database: 'ecommerce',
+  user: 'postgres',
+  password: 'password',
+  max: 20,
+  idleTimeoutMillis: 30000
+});
+
+// Create adapter
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints()
+  ],
+  schemas: ['public']  // Only public schema
+});
+
+// Create Text2SQL with domain knowledge
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter,
+  store: new InMemoryContextStore(),
+  teachingsOptions: {
+    fragments: [
+      term('MRR', 'monthly recurring revenue'),
+      hint('Exclude test accounts with email LIKE "%@test.com"')
+    ]
+  }
+});
+
+// Generate queries
+async function demo() {
+  try {
+    // Simple query
+    const sql1 = await text2sql.toSql('Show all customers from California');
+    console.log('Query 1:', sql1);
+    const results1 = await pool.query(sql1);
+    console.log('Results:', results1.rows);
+    
+    // Aggregation with JOIN
+    const sql2 = await text2sql.toSql('Show customer names with order count');
+    console.log('Query 2:', sql2);
+    const results2 = await pool.query(sql2);
+    console.log('Results:', results2.rows);
+    
+    // Complex query with business term
+    const sql3 = await text2sql.toSql('What is MRR trend over last 6 months?');
+    console.log('Query 3:', sql3);
+    const results3 = await pool.query(sql3);
+    console.log('Results:', results3.rows);
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    await pool.end();
+  }
+}
+
+demo();
+```
+
+## Connection Pooling
+
+Use connection pooling for better performance:
+
+```typescript
+import pg from 'pg';
+
+const pool = new pg.Pool({
+  host: 'localhost',
+  database: 'mydb',
+  user: 'postgres',
+  password: 'password',
+  max: 20,                    // Max clients
+  idleTimeoutMillis: 30000,   // Close idle clients after 30s
+  connectionTimeoutMillis: 2000  // Wait 2s for connection
+});
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [tables()]
+});
+
+// Clean shutdown
+process.on('SIGTERM', async () => {
+  await pool.end();
+  process.exit(0);
+});
+```
+
+## SSL Connections
+
+Connect securely:
+
+```typescript
+import pg from 'pg';
+import fs from 'fs';
+
+const pool = new pg.Pool({
+  host: 'db.example.com',
+  database: 'mydb',
+  user: 'postgres',
+  password: 'password',
+  ssl: {
+    rejectUnauthorized: true,
+    ca: fs.readFileSync('./ca-cert.pem').toString()
+  }
+});
+```
+
+## Performance Tips
+
+### 1. Use Indexes
+
+PostgreSQL supports multiple index types:
+
+```sql
+-- B-tree (default, good for equality and range queries)
+CREATE INDEX idx_customers_email ON customers(email);
+
+-- GIN (good for JSONB, arrays, full-text search)
+CREATE INDEX idx_products_tags ON products USING GIN (tags);
+
+-- GiST (good for geometric data, full-text search)
+CREATE INDEX idx_locations ON stores USING GIST (location);
+
+-- Hash (good for equality comparisons only)
+CREATE INDEX idx_orders_status ON orders USING HASH (status);
+```
+
+### 2. Analyze Statistics
+
+Keep statistics up to date:
+
+```sql
+ANALYZE customers;
+ANALYZE orders;
+
+-- Or analyze all tables
+ANALYZE;
+```
+
+### 3. Use Partial Indexes
+
+Index only relevant rows:
+
+```sql
+CREATE INDEX idx_active_customers 
+  ON customers(email) 
+  WHERE status = 'active';
+```
+
+### 4. Optimize Introspection
+
+```typescript
+// Fast introspection (recommended for large databases)
+grounding: [
+  tables(),
+  constraints()
+]
+
+// Comprehensive introspection (slower)
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints(),
+  rowCount(),
+  columnStats(),
+  columnValues()
+]
+```
+
+## Advanced Features
+
+### JSON Support
+
+PostgreSQL JSON columns work seamlessly:
+
+```typescript
+const sql = await text2sql.toSql(
+  'Show customers where metadata contains key "premium"'
+);
+// SELECT * FROM customers WHERE metadata->>'premium' IS NOT NULL
+```
+
+### Array Support
+
+```typescript
+const sql = await text2sql.toSql(
+  'Show products with tag "electronics"'
+);
+// SELECT * FROM products WHERE 'electronics' = ANY(tags)
+```
+
+### Full-Text Search
+
+```typescript
+const sql = await text2sql.toSql(
+  'Search products containing "laptop" in description'
+);
+// SELECT * FROM products 
+// WHERE to_tsvector('english', description) @@ to_tsquery('laptop')
+```
+
+### Window Functions
+
+```typescript
+const sql = await text2sql.toSql(
+  'Show top 3 orders per customer by amount'
+);
+// Uses ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC)
+```
+
+## Best Practices
+
+### 1. Use Schemas for Organization
+
+```sql
+CREATE SCHEMA analytics;
+CREATE SCHEMA staging;
+
+CREATE TABLE analytics.daily_revenue (...);
+CREATE TABLE staging.import_data (...);
+```
+
+### 2. Set Search Path
+
+```typescript
+const pool = new pg.Pool({
+  // ...
+  options: '-c search_path=public,analytics'
+});
+```
+
+### 3. Use Constraints
+
+```sql
+ALTER TABLE orders 
+  ADD CONSTRAINT fk_customer 
+  FOREIGN KEY (customer_id) REFERENCES customers(id);
+
+ALTER TABLE orders
+  ADD CONSTRAINT check_positive_amount
+  CHECK (amount > 0);
+```
+
+### 4. Monitor Performance
+
+```sql
+-- Check slow queries
+SELECT * FROM pg_stat_statements
+ORDER BY mean_exec_time DESC
+LIMIT 10;
+
+-- Check index usage
+SELECT * FROM pg_stat_user_indexes
+WHERE idx_scan = 0;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SQL Server Adapter" icon="server" href="/text2sql/adapters/sqlserver">
+    Setup for SQL Server databases
+  </Card>
+  <Card title="MySQL Adapter" icon="leaf" href="/text2sql/adapters/mysql">
+    Setup for MySQL and MariaDB
+  </Card>
+  <Card title="Teachables" icon="graduation-cap" href="/text2sql/teachables">
+    Inject domain knowledge
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API documentation
+  </Card>
+</CardGroup>

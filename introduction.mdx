@@ -1,0 +1,224 @@
+---
+title: 'Welcome to DeepAgents'
+description: 'A complete framework for building production-ready AI agent systems with TypeScript'
+---
+
+## Build AI Agents That Actually Work
+
+DeepAgents is a TypeScript framework for building multi-agent AI systems that handle complex, real-world tasks. Create agents that use tools, coordinate through handoffs, query databases in natural language, and leverage RAG for intelligent document retrieval.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes with your first agent
+  </Card>
+  <Card title="Core Concepts" icon="brain" href="/concepts/agents">
+    Learn about agent architecture and composition patterns
+  </Card>
+  <Card title="API Reference" icon="code" href="/packages/agent">
+    Explore the complete package documentation
+  </Card>
+  <Card title="Examples" icon="book" href="https://github.com/JanuaryLabs/deepagents/tree/main/packages/agent/src/lib/examples">
+    See real-world agent implementations
+  </Card>
+</CardGroup>
+
+## Why DeepAgents?
+
+<CardGroup cols={3}>
+  <Card title="Type-Safe" icon="shield-check">
+    Full TypeScript support with inference for context, outputs, and tools
+  </Card>
+  <Card title="Multi-Agent" icon="users">
+    Built-in handoffs for agent delegation and coordination
+  </Card>
+  <Card title="Production-Ready" icon="server">
+    Context persistence, streaming, error recovery, and evals
+  </Card>
+  <Card title="Model-Agnostic" icon="wand-magic-sparkles">
+    Works with OpenAI, Anthropic, Google, Groq, and any Vercel AI SDK provider
+  </Card>
+  <Card title="SQL Generation" icon="database">
+    Natural language to SQL with multi-database support
+  </Card>
+  <Card title="RAG Built-In" icon="magnifying-glass">
+    Local-first retrieval with vector search and embeddings
+  </Card>
+</CardGroup>
+
+## Framework Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Core agent framework with tools, handoffs, and streaming
+  </Card>
+  <Card title="@deepagents/context" icon="layer-group" href="/packages/context">
+    Context management with XML, Markdown, and TOML renderers
+  </Card>
+  <Card title="@deepagents/text2sql" icon="database" href="/packages/text2sql">
+    AI-powered natural language to SQL queries
+  </Card>
+  <Card title="@deepagents/retrieval" icon="file-import" href="/packages/retrieval">
+    Local-first RAG with vector embeddings and search
+  </Card>
+  <Card title="@deepagents/evals" icon="chart-line" href="/packages/evals">
+    LLM evaluation framework with scoring and persistence
+  </Card>
+  <Card title="@deepagents/orchestrator" icon="diagram-project" href="/packages/orchestrator">
+    High-level orchestration patterns for complex workflows
+  </Card>
+  <Card title="@deepagents/toolbox" icon="toolbox" href="/packages/toolbox">
+    Pre-built tools for web search, filesystem, and more
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Agent Composition
+
+Build modular agents with specific roles and capabilities. Agents can use tools, maintain context, and delegate to specialized agents.
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful AI assistant.',
+});
+
+const stream = execute(assistant, 'Hello!', {});
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+### Multi-Agent Coordination
+
+Agents automatically coordinate through handoffs, allowing specialized agents to handle specific tasks.
+
+```typescript
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'You research topics thoroughly.',
+  handoffDescription: 'Handles research and fact-finding',
+});
+
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'You write clear, engaging content.',
+  handoffDescription: 'Handles content creation',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: 'Coordinate research and writing tasks',
+  handoffs: [researcher, writer],
+});
+```
+
+### Natural Language to SQL
+
+Convert questions to validated, executable SQL queries with built-in safety and domain knowledge injection.
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { Postgres, tables, constraints } from '@deepagents/text2sql/postgres';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: groq('llama-3.3-70b-versatile'),
+  adapter: new Postgres({
+    execute: async (sql) => pool.query(sql).then(r => r.rows),
+    grounding: [tables(), constraints()],
+  }),
+});
+
+const sql = await text2sql.toSql('Show top 10 customers by revenue');
+```
+
+### RAG and Document Search
+
+Ingest content from various sources and perform semantic search with local embeddings.
+
+```typescript
+import { ingest, similaritySearch } from '@deepagents/retrieval';
+import { githubConnector } from '@deepagents/retrieval/connectors';
+
+await ingest({
+  connector: githubConnector({
+    owner: 'JanuaryLabs',
+    repo: 'deepagents',
+  }),
+  store: sqliteStore,
+  embedder: fastEmbed,
+});
+
+const results = await similaritySearch({
+  query: 'How do agent handoffs work?',
+  store: sqliteStore,
+  embedder: fastEmbed,
+  limit: 5,
+});
+```
+
+## Philosophy
+
+<Note>
+DeepAgents is in early development with **no backwards compatibility concerns**. We do things RIGHT: clean, organized, zero tech debt. No workarounds, only full implementations built for scale.
+</Note>
+
+We focus on:
+
+- **Type Safety** - Full TypeScript inference across all APIs
+- **Composability** - Build complex systems from simple, reusable agents
+- **Production Quality** - Persistence, streaming, error recovery, and evaluation
+- **Developer Experience** - Clear APIs, helpful errors, comprehensive examples
+
+## Getting Started
+
+<Steps>
+  <Step title="Install the packages">
+    ```bash
+    npm install @deepagents/agent @ai-sdk/openai ai zod
+    ```
+  </Step>
+  <Step title="Create your first agent">
+    ```typescript
+    import { agent, execute } from '@deepagents/agent';
+    import { openai } from '@ai-sdk/openai';
+
+    const assistant = agent({
+      name: 'assistant',
+      model: openai('gpt-4o'),
+      prompt: 'You are a helpful assistant.',
+    });
+    ```
+  </Step>
+  <Step title="Execute and stream responses">
+    ```typescript
+    const stream = execute(assistant, 'Tell me about AI agents', {});
+    console.log(await stream.text);
+    ```
+  </Step>
+</Steps>
+
+Continue to the [Quick Start Guide](/quickstart) for a complete walkthrough.
+
+## Community and Support
+
+<CardGroup cols={2}>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/JanuaryLabs/deepagents">
+    Star the repo, report issues, and contribute
+  </Card>
+  <Card title="Report Issues" icon="bug" href="https://github.com/JanuaryLabs/deepagents/issues">
+    Found a bug? Let us know
+  </Card>
+</CardGroup>
+
+## License
+
+DeepAgents is MIT licensed. See the [LICENSE](https://github.com/JanuaryLabs/deepagents/blob/main/LICENSE) file for details.

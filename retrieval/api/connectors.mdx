@@ -1,0 +1,526 @@
+---
+title: 'Connector API Reference'
+description: 'API documentation for the Connector interface'
+---
+
+# Connector API Reference
+
+Complete API reference for the `Connector` interface and related types.
+
+## Connector Interface
+
+All connectors implement this interface:
+
+```typescript
+export type Connector = {
+  sourceId: string;
+  sources: () => AsyncGenerator<Document>;
+  ingestWhen?: 'never' | 'contentChanged' | 'expired';
+  expiresAfter?: number;
+};
+```
+
+Location: `/home/daytona/workspace/source/packages/retrieval/src/lib/connectors/connector.ts:1-28`
+
+## Properties
+
+### sourceId
+
+**Type:** `string`
+
+**Required:** Yes
+
+Unique identifier for the logical source (group of documents) used in the embedding store.
+
+```typescript
+const connector = github.file('facebook/react/README.md');
+console.log(connector.sourceId);
+// "github:file:facebook/react/README.md"
+```
+
+**Format:**
+
+Convention is `{source-type}:{identifier}`:
+
+- `github:file:{path}` - GitHub file
+- `github:releases:{repo}` - GitHub releases
+- `github:repo:{url}` - GitHub repository
+- `rss:{url}` - RSS feed
+- `glob:{pattern}` - Local files
+- `pdf:{pattern}` - PDF files
+- `linear:workspace` - Linear issues
+
+### sources
+
+**Type:** `() => AsyncGenerator<Document>`
+
+**Required:** Yes
+
+Async generator function that yields documents to ingest.
+
+```typescript
+sources: async function* () {
+  yield {
+    id: 'doc-1',
+    content: async () => 'Document content',
+    metadata: { author: 'John' },
+  };
+  yield {
+    id: 'doc-2',
+    content: async () => 'Another document',
+  };
+}
+```
+
+### ingestWhen
+
+**Type:** `'never' | 'contentChanged' | 'expired'`
+
+**Required:** No
+
+**Default:** `'contentChanged'`
+
+Controls ingestion behavior:
+
+**'never'**
+
+Perform ingestion only if the source does NOT yet exist. Once created, never re-ingest.
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'never',
+});
+```
+
+**'contentChanged'** (default)
+
+Run ingestion. Underlying pipeline will skip unchanged documents via content hashing.
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged',
+});
+```
+
+**'expired'**
+
+Only ingest if source doesn't exist OR is expired.
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000,
+});
+```
+
+### expiresAfter
+
+**Type:** `number`
+
+**Required:** No
+
+**Unit:** Milliseconds
+
+Optional expiry duration in milliseconds from now. When set, the source will be considered expired after this duration.
+
+```typescript
+const connector = rss('https://example.com/feed', {
+  ingestWhen: 'expired',
+  expiresAfter: 60 * 60 * 1000, // 1 hour
+});
+```
+
+## Document Type
+
+Documents yielded by `sources()`:
+
+```typescript
+type Document = {
+  id: string;
+  content: () => Promise<string>;
+  metadata?: Record<string, unknown>;
+};
+```
+
+### id
+
+**Type:** `string`
+
+**Required:** Yes
+
+Unique document identifier within the source.
+
+```typescript
+{
+  id: 'facebook/react/README.md',
+  // ...
+}
+```
+
+### content
+
+**Type:** `() => Promise<string>`
+
+**Required:** Yes
+
+Async function that returns document content.
+
+```typescript
+{
+  id: 'doc-1',
+  content: async () => {
+    const text = await fetch(url).then(r => r.text());
+    return text;
+  },
+}
+```
+
+### metadata
+
+**Type:** `Record<string, unknown>`
+
+**Required:** No
+
+Arbitrary per-document metadata stored with embeddings.
+
+```typescript
+{
+  id: 'article-1',
+  content: async () => articleText,
+  metadata: {
+    author: 'John Doe',
+    date: '2024-01-01',
+    category: 'tech',
+  },
+}
+```
+
+## Creating Custom Connectors
+
+### Basic Example
+
+```typescript
+import type { Connector } from '@deepagents/retrieval/connectors';
+
+export function customConnector(url: string): Connector {
+  return {
+    sourceId: `custom:${url}`,
+    
+    sources: async function* () {
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      for (const item of data.items) {
+        yield {
+          id: item.id,
+          content: async () => item.text,
+          metadata: {
+            title: item.title,
+            date: item.date,
+          },
+        };
+      }
+    },
+    
+    ingestWhen: 'contentChanged',
+  };
+}
+```
+
+### With Expiry
+
+```typescript
+export function newsConnector(apiUrl: string): Connector {
+  return {
+    sourceId: `news:${apiUrl}`,
+    
+    sources: async function* () {
+      const articles = await fetchArticles(apiUrl);
+      
+      for (const article of articles) {
+        yield {
+          id: article.slug,
+          content: async () => article.content,
+          metadata: {
+            title: article.title,
+            published: article.publishedAt,
+          },
+        };
+      }
+    },
+    
+    ingestWhen: 'expired',
+    expiresAfter: 60 * 60 * 1000, // 1 hour
+  };
+}
+```
+
+### With Error Handling
+
+```typescript
+export function robustConnector(source: string): Connector {
+  return {
+    sourceId: `robust:${source}`,
+    
+    sources: async function* () {
+      try {
+        const items = await fetchItems(source);
+        
+        for (const item of items) {
+          yield {
+            id: item.id,
+            content: async () => {
+              try {
+                return await fetchContent(item.url);
+              } catch (error) {
+                console.error(`Failed to fetch ${item.id}:`, error);
+                return ''; // Return empty on error
+              }
+            },
+          };
+        }
+      } catch (error) {
+        console.error('Failed to fetch items:', error);
+        // Generator completes with no items
+      }
+    },
+  };
+}
+```
+
+## Built-in Connectors
+
+### github.file()
+
+```typescript
+function file(filePath: string): Connector
+```
+
+Fetch a single file from GitHub.
+
+**Example:**
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+
+const connector = github.file('facebook/react/README.md');
+```
+
+### github.release()
+
+```typescript
+function release(
+  repo: string,
+  options?: ReleaseFetchOptions
+): Connector
+```
+
+Fetch GitHub release notes.
+
+**Example:**
+
+```typescript
+const connector = github.release('facebook/react', {
+  untilTag: 'v18.0.0',
+  inclusive: true,
+});
+```
+
+### github.repo()
+
+```typescript
+function repo(
+  repoUrl: string,
+  opts: {
+    includes: string[];
+    excludes?: string[];
+    branch?: string;
+    includeGitignored?: boolean;
+    includeSubmodules?: boolean;
+    githubToken?: string;
+    ingestWhen?: 'never' | 'contentChanged';
+  }
+): Connector
+```
+
+Ingest entire repository using gitingest.
+
+**Example:**
+
+```typescript
+const connector = github.repo(
+  'https://github.com/vercel/next.js',
+  {
+    includes: ['**/*.md'],
+    branch: 'canary',
+  }
+);
+```
+
+### rss()
+
+```typescript
+function rss(
+  feedUrl: string,
+  options?: {
+    maxItems?: number;
+    fetchFullArticles?: boolean;
+  }
+): Connector
+```
+
+Fetch RSS/Atom feed items.
+
+**Example:**
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+
+const connector = rss('https://hnrss.org/frontpage', {
+  maxItems: 10,
+  fetchFullArticles: true,
+});
+```
+
+### local()
+
+```typescript
+function local(
+  pattern: string,
+  options?: {
+    ingestWhen?: 'never' | 'contentChanged' | 'expired';
+    expiresAfter?: number;
+    cwd?: string;
+  }
+): Connector
+```
+
+Match local files using glob patterns.
+
+**Example:**
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('docs/**/*.md', {
+  cwd: process.cwd(),
+});
+```
+
+### pdf()
+
+```typescript
+function pdf(pattern: string): Connector
+```
+
+Match PDF files using glob patterns.
+
+**Example:**
+
+```typescript
+import { pdf } from '@deepagents/retrieval/connectors';
+
+const connector = pdf('research/**/*.pdf');
+```
+
+### pdfFile()
+
+```typescript
+function pdfFile(source: string): Connector
+```
+
+Fetch a single PDF from file path or URL.
+
+**Example:**
+
+```typescript
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const connector = pdfFile('./manual.pdf');
+// or
+const connector2 = pdfFile('https://example.com/paper.pdf');
+```
+
+### linear()
+
+```typescript
+function linear(apiKey: string): Connector
+```
+
+Fetch Linear issues assigned to user.
+
+**Example:**
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+
+const connector = linear(process.env.LINEAR_API_KEY!);
+```
+
+## Best Practices
+
+### Unique Source IDs
+
+Ensure source IDs uniquely identify content:
+
+```typescript
+// Good
+sourceId: `github:file:${owner}/${repo}/${path}`
+
+// Bad - may conflict
+sourceId: 'github-file'
+```
+
+### Error Handling in Content
+
+Handle errors gracefully in `content()` function:
+
+```typescript
+content: async () => {
+  try {
+    return await fetchContent();
+  } catch (error) {
+    console.error('Content fetch failed:', error);
+    return ''; // Return empty, don't throw
+  }
+}
+```
+
+### Lazy Content Loading
+
+Use async functions to defer content loading:
+
+```typescript
+// Good - content loaded only when needed
+content: async () => await fetch(url).then(r => r.text())
+
+// Bad - content loaded immediately
+content: async () => alreadyLoadedContent
+```
+
+### Meaningful Metadata
+
+Include metadata that aids filtering or display:
+
+```typescript
+metadata: {
+  type: 'article',
+  published: new Date().toISOString(),
+  author: 'John Doe',
+  tags: ['tech', 'tutorial'],
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Store API" icon="database" href="/retrieval/api/stores">
+    Store interface reference
+  </Card>
+  <Card title="Core API" icon="code" href="/retrieval/api/core">
+    ingest() and similaritySearch() reference
+  </Card>
+  <Card title="Connectors Guide" icon="plug" href="/retrieval/connectors">
+    Learn about connectors
+  </Card>
+</CardGroup>

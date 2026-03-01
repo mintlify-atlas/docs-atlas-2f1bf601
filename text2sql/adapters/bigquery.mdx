@@ -1,0 +1,234 @@
+---
+title: BigQuery Adapter
+description: Setup and configuration for Google Cloud BigQuery
+---
+
+# BigQuery Adapter
+
+The BigQuery adapter provides support for Google Cloud's serverless data warehouse with nested and repeated fields.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+# BigQuery client is included in @deepagents/text2sql
+```
+
+## Basic Usage
+
+```typescript
+import { BigQuery, tables, views, info } from '@deepagents/text2sql/bigquery';
+import { BigQuery as BQClient } from '@google-cloud/bigquery';
+
+const client = new BQClient({
+  projectId: 'my-project',
+  keyFilename: './service-account-key.json'
+});
+
+const adapter = new BigQuery({
+  execute: async (sql) => {
+    const [rows] = await client.query(sql);
+    return rows;
+  },
+  validate: async (sql) => {
+    // Dry-run validation
+    await client.query({ query: sql, dryRun: true });
+  },
+  datasets: ['analytics', 'marketing'],  // Required
+  projectId: 'my-project',  // Optional
+  grounding: [tables(), views(), info()]
+});
+```
+
+## Configuration
+
+```typescript
+interface BigQueryAdapterOptions {
+  execute: ExecuteFunction;
+  validate: ValidateFunction;  // Required (use dry-run)
+  grounding: GroundingFn[];
+  datasets: string[];  // Required: datasets to introspect
+  projectId?: string;  // Optional: project ID
+}
+```
+
+**Important**: 
+- `datasets` is **required** - limits introspection scope
+- `validate` is **required** - use BigQuery dry-run
+
+## BigQuery Features
+
+### Dataset Scoping
+
+BigQuery organizes tables into datasets:
+
+```typescript
+const adapter = new BigQuery({
+  // ...
+  datasets: ['analytics', 'marketing'],  // Only introspect these
+  projectId: 'my-project'
+});
+```
+
+### Identifier Quoting
+
+BigQuery uses backticks:
+
+```typescript
+adapter.quoteIdentifier('my_table');      // `my_table`
+adapter.quoteIdentifier('dataset.table'); // `dataset`.`table`
+```
+
+### Nested Fields
+
+BigQuery supports nested and repeated fields:
+
+```sql
+-- Access nested fields
+SELECT user.address.city FROM customers
+
+-- UNNEST repeated fields
+SELECT order_id, item
+FROM orders
+CROSS JOIN UNNEST(items) AS item
+```
+
+### Dry-Run Validation
+
+Always use dry-run for validation:
+
+```typescript
+const adapter = new BigQuery({
+  execute: async (sql) => {
+    const [rows] = await client.query(sql);
+    return rows;
+  },
+  validate: async (sql) => {
+    const [job] = await client.createQueryJob({
+      query: sql,
+      dryRun: true
+    });
+    // Dry-run succeeded, query is valid
+  },
+  // ...
+});
+```
+
+## Complete Example
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { BigQuery, tables, constraints } from '@deepagents/text2sql/bigquery';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import { BigQuery as BQClient } from '@google-cloud/bigquery';
+
+const client = new BQClient({
+  projectId: 'my-project',
+  credentials: {
+    client_email: process.env.BQ_CLIENT_EMAIL,
+    private_key: process.env.BQ_PRIVATE_KEY
+  }
+});
+
+const adapter = new BigQuery({
+  execute: async (sql) => {
+    const [rows] = await client.query(sql);
+    return rows;
+  },
+  validate: async (sql) => {
+    await client.query({ query: sql, dryRun: true });
+  },
+  datasets: ['analytics'],
+  projectId: 'my-project',
+  grounding: [tables(), constraints()]
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter,
+  store: new InMemoryContextStore()
+});
+
+const sql = await text2sql.toSql('Show top 10 users by sessions');
+console.log(sql);
+```
+
+## Authentication
+
+### Service Account Key
+
+```typescript
+const client = new BQClient({
+  projectId: 'my-project',
+  keyFilename: './service-account.json'
+});
+```
+
+### Environment Variables
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="./service-account.json"
+```
+
+```typescript
+const client = new BQClient({ projectId: 'my-project' });
+```
+
+### Application Default Credentials
+
+```typescript
+const client = new BQClient();
+```
+
+## Best Practices
+
+### 1. Use Partitioned Tables
+
+```sql
+CREATE TABLE analytics.events
+(
+  event_timestamp TIMESTAMP,
+  user_id STRING,
+  event_name STRING
+)
+PARTITION BY DATE(event_timestamp);
+```
+
+### 2. Leverage Clustering
+
+```sql
+CREATE TABLE analytics.events
+(
+  event_timestamp TIMESTAMP,
+  user_id STRING,
+  event_name STRING
+)
+PARTITION BY DATE(event_timestamp)
+CLUSTER BY user_id, event_name;
+```
+
+### 3. Optimize Costs
+
+```typescript
+// Always validate with dry-run
+await client.query({ query: sql, dryRun: true });
+
+// Use query caching
+const [rows] = await client.query({
+  query: sql,
+  useQueryCache: true
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Overview of all adapters
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API
+  </Card>
+</CardGroup>

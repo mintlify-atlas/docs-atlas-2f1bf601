@@ -1,0 +1,355 @@
+---
+title: Dataset API
+description: API reference for dataset loading and transforms
+---
+
+# Dataset API
+
+The dataset module provides lazy, chainable iterables for loading and transforming evaluation data.
+
+## Import
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+```
+
+## `dataset(source)`
+
+Create a dataset from various sources.
+
+### Signature
+
+```typescript
+function dataset<T>(
+  source: T[] | string | AsyncIterable<T>
+): Dataset<T>;
+```
+
+### Parameters
+
+#### `source: T[]`
+
+Inline array:
+
+```typescript
+const ds = dataset([
+  { input: 'What is 2+2?', expected: '4' },
+]);
+```
+
+#### `source: string`
+
+File path (`.json`, `.jsonl`, `.csv`):
+
+```typescript
+const ds = dataset('./questions.json');
+const ds = dataset('./questions.jsonl');
+const ds = dataset('./questions.csv');
+```
+
+#### `source: AsyncIterable<T>`
+
+Custom async iterable:
+
+```typescript
+async function* loadFromDB() {
+  const rows = await db.query('SELECT * FROM test_cases');
+  for (const row of rows) {
+    yield { input: row.question, expected: row.answer };
+  }
+}
+
+const ds = dataset(loadFromDB());
+```
+
+## `Dataset<T>`
+
+The `Dataset` class implements `AsyncIterable<T>` and provides chainable transform methods.
+
+### `map<U>(fn)`
+
+Transform each item:
+
+```typescript
+const ds = dataset('./raw-data.json')
+  .map((row) => ({
+    input: row.question,
+    expected: row.answer,
+  }));
+```
+
+**Type:**
+
+```typescript
+map<U>(fn: (item: T) => U): Dataset<U>
+```
+
+**Lazy:** ✅
+
+### `filter(fn)`
+
+Exclude items that don't match a predicate:
+
+```typescript
+const ds = dataset('./data.json')
+  .filter((row) => row.difficulty === 'hard');
+```
+
+**Type:**
+
+```typescript
+filter(fn: (item: T) => boolean): Dataset<T>
+```
+
+**Lazy:** ✅
+
+### `limit(n)`
+
+Cap the dataset at `n` items:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .limit(100);
+```
+
+**Type:**
+
+```typescript
+limit(n: number): Dataset<T>
+```
+
+**Lazy:** ✅
+
+### `shuffle()`
+
+Randomize the order of items:
+
+```typescript
+const ds = dataset('./data.json')
+  .shuffle();
+```
+
+**Type:**
+
+```typescript
+shuffle(): Dataset<T>
+```
+
+**Eager:** ⚠️ Buffers all items into memory.
+
+### `sample(n)`
+
+Pick `n` random items:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .sample(50);
+```
+
+**Type:**
+
+```typescript
+sample(n: number): Dataset<T>
+```
+
+**Eager:** ⚠️ Buffers all items into memory.
+
+### `pick(indexes)`
+
+Select specific items by index:
+
+```typescript
+const ds = dataset('./data.json')
+  .pick(new Set([0, 5, 10]));
+```
+
+**Type:**
+
+```typescript
+pick(indexes: Set<number>): Dataset<T>
+```
+
+**Lazy:** ✅
+
+### `toArray()`
+
+Consume the dataset into a plain array:
+
+```typescript
+const items = await dataset('./data.json').toArray();
+console.log(items.length);
+```
+
+**Type:**
+
+```typescript
+toArray(): Promise<T[]>
+```
+
+**Eager:** ⚠️ Loads all items into memory.
+
+## Hugging Face Datasets
+
+### `hf(options)`
+
+Load datasets from Hugging Face:
+
+```typescript
+import { hf } from '@deepagents/evals/dataset';
+
+const ds = hf({
+  repo: 'rajpurkar/squad',
+  split: 'validation',
+  limit: 100,
+});
+```
+
+**Options:**
+
+```typescript
+interface HfOptions {
+  repo: string;       // Hugging Face repo ID
+  split: string;      // Dataset split (e.g., 'train', 'validation')
+  limit?: number;     // Maximum number of rows to fetch
+}
+```
+
+## Record Selection
+
+### `parseRecordSelection(spec)`
+
+Parse a record selection string:
+
+```typescript
+import { parseRecordSelection } from '@deepagents/evals/dataset';
+
+const { indexes } = parseRecordSelection('0-10,15,20-25');
+// indexes: Set { 0, 1, 2, ..., 10, 15, 20, 21, ..., 25 }
+```
+
+**Type:**
+
+```typescript
+function parseRecordSelection(spec: string): ParsedRecordSelection;
+
+interface ParsedRecordSelection {
+  indexes: Set<number>;
+}
+```
+
+**Supported formats:**
+
+- `0-10` — Range from 0 to 10 (inclusive)
+- `5` — Single index
+- `0-10,15,20-25` — Multiple ranges and indexes
+
+### `filterRecordsByIndex(iterable, indexes)`
+
+Filter an iterable by index set:
+
+```typescript
+import { filterRecordsByIndex } from '@deepagents/evals/dataset';
+
+const filtered = filterRecordsByIndex(
+  dataset('./data.json'),
+  new Set([0, 5, 10])
+);
+```
+
+**Type:**
+
+```typescript
+function filterRecordsByIndex<T>(
+  iterable: AsyncIterable<T>,
+  indexes: Set<number>
+): AsyncIterable<T>;
+```
+
+### `pickFromArray(array, indexes)`
+
+Pick specific items from an array:
+
+```typescript
+import { pickFromArray } from '@deepagents/evals/dataset';
+
+const items = [1, 2, 3, 4, 5];
+const picked = pickFromArray(items, new Set([0, 2, 4]));
+// [1, 3, 5]
+```
+
+**Type:**
+
+```typescript
+function pickFromArray<T>(array: T[], indexes: Set<number>): T[];
+```
+
+## Types
+
+### `TransformFn<T, U>`
+
+```typescript
+type TransformFn<T, U> = (item: T) => U;
+```
+
+### `PredicateFn<T>`
+
+```typescript
+type PredicateFn<T> = (item: T) => boolean;
+```
+
+## Examples
+
+### Loading from JSON
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+
+const ds = dataset('./questions.json');
+
+for await (const item of ds) {
+  console.log(item);
+}
+```
+
+### Chaining Transforms
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .filter((row) => row.difficulty === 'hard')
+  .map((row) => ({ input: row.question, expected: row.answer }))
+  .shuffle()
+  .limit(100);
+```
+
+### Custom Async Iterable
+
+```typescript
+async function* loadFromDB() {
+  const rows = await db.query('SELECT * FROM test_cases');
+  for (const row of rows) {
+    yield { input: row.question, expected: row.answer };
+  }
+}
+
+const ds = dataset(loadFromDB());
+```
+
+### Record Selection
+
+```typescript
+import { parseRecordSelection } from '@deepagents/evals/dataset';
+
+const { indexes } = parseRecordSelection('0-10,15,20-25');
+const ds = dataset('./data.json').pick(indexes);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scorers" icon="star" href="/evals/scorers">
+    Learn about scoring functions
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/evals/quickstart">
+    Run your first evaluation
+  </Card>
+</CardGroup>

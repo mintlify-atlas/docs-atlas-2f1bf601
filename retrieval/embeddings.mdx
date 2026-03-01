@@ -1,0 +1,376 @@
+---
+title: 'FastEmbed Local Embeddings'
+description: 'Generate embeddings locally with FastEmbed'
+---
+
+# FastEmbed Local Embeddings
+
+The retrieval package uses FastEmbed for local embedding generation. No external API calls required - all models run locally on your machine.
+
+## Overview
+
+FastEmbed provides fast, efficient embedding generation using optimized ONNX models. Perfect for RAG systems that need:
+
+- Local-first embedding generation
+- No API costs or rate limits
+- Privacy and security (data never leaves your machine)
+- Consistent, reproducible embeddings
+
+## Basic Usage
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+// Create embedder with default model (BGE-Small-EN-V15)
+const embedder = fastembed();
+
+// Generate embeddings
+const result = await embedder([
+  'First document text',
+  'Second document text',
+]);
+
+console.log(result.embeddings.length); // 2
+console.log(result.dimensions);        // 384
+```
+
+## Configuration Options
+
+```typescript
+export interface FastEmbedOptions {
+  model?: StandardModel;  // Embedding model to use
+  batchSize?: number;     // Batch size for processing
+  cacheDir?: string;      // Model cache directory
+}
+```
+
+### Model Selection
+
+```typescript
+import { fastembed, EmbeddingModel } from '@deepagents/retrieval';
+
+const embedder = fastembed({
+  model: 'BGESmallENV15', // 384 dimensions
+});
+```
+
+### Batch Size
+
+```typescript
+const embedder = fastembed({
+  batchSize: 32, // Process 32 documents at a time
+});
+```
+
+### Cache Directory
+
+```typescript
+const embedder = fastembed({
+  cacheDir: './models', // Store models in ./models directory
+});
+```
+
+## Available Models
+
+FastEmbed supports several high-quality embedding models:
+
+### BGESmallENV15 (Default)
+
+```typescript
+const embedder = fastembed({ model: 'BGESmallENV15' });
+```
+
+- **Dimensions**: 384
+- **Speed**: Fast
+- **Quality**: Good
+- **Best for**: General-purpose embeddings, fast inference
+
+### BGEBaseENV15
+
+```typescript
+const embedder = fastembed({ model: 'BGEBaseENV15' });
+```
+
+- **Dimensions**: 768
+- **Speed**: Medium
+- **Quality**: Better
+- **Best for**: Higher quality embeddings, balanced performance
+
+### BGESmallEN
+
+```typescript
+const embedder = fastembed({ model: 'BGESmallEN' });
+```
+
+- **Dimensions**: 384
+- **Speed**: Fast
+- **Quality**: Good
+- **Best for**: Alternative to BGESmallENV15
+
+### BGEBaseEN
+
+```typescript
+const embedder = fastembed({ model: 'BGEBaseEN' });
+```
+
+- **Dimensions**: 768
+- **Speed**: Medium
+- **Quality**: Better
+- **Best for**: Higher quality, v1.0 model
+
+### AllMiniLML6V2
+
+```typescript
+const embedder = fastembed({ model: 'AllMiniLML6V2' });
+```
+
+- **Dimensions**: 384
+- **Speed**: Fast
+- **Quality**: Good
+- **Best for**: Lightweight, fast embeddings
+
+### MLE5Large
+
+```typescript
+const embedder = fastembed({ model: 'MLE5Large' });
+```
+
+- **Dimensions**: 1024
+- **Speed**: Slower
+- **Quality**: Best
+- **Best for**: Maximum quality, multilingual support
+
+### BGESmallZH
+
+```typescript
+const embedder = fastembed({ model: 'BGESmallZH' });
+```
+
+- **Dimensions**: 512
+- **Speed**: Fast
+- **Quality**: Good
+- **Best for**: Chinese language text
+
+## Model Download
+
+Models are automatically downloaded on first use:
+
+```typescript
+const embedder = fastembed({ model: 'BGESmallENV15' });
+
+// First call downloads the model (one-time operation)
+const result = await embedder(['Hello world']);
+
+// Subsequent calls use cached model (instant)
+const result2 = await embedder(['Another document']);
+```
+
+Models are cached in:
+- Default: System cache directory
+- Custom: Specified via `cacheDir` option
+
+## Embedder Function
+
+The embedder returns a function with this signature:
+
+```typescript
+type Embedder = (documents: string[]) => Promise<{
+  embeddings: (number[] | Float32Array)[];
+  dimensions: number;
+}>;
+```
+
+### Input
+
+Array of document strings:
+
+```typescript
+const docs = [
+  'First document',
+  'Second document',
+  'Third document',
+];
+
+const result = await embedder(docs);
+```
+
+### Output
+
+Object containing embeddings and dimensions:
+
+```typescript
+{
+  embeddings: [
+    [0.1, 0.2, ...], // First document embedding
+    [0.3, 0.4, ...], // Second document embedding
+    [0.5, 0.6, ...], // Third document embedding
+  ],
+  dimensions: 384
+}
+```
+
+## Integration with Ingestion
+
+Use embedder with ingestion:
+
+```typescript
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+// Create embedder
+const embedder = fastembed({ model: 'BGESmallENV15' });
+
+// Create store with matching dimensions
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384); // Must match model dimensions
+
+// Ingest documents
+await ingest({
+  connector: local('**/*.md'),
+  store,
+  embedder,
+});
+```
+
+**Important**: Store dimensions must match model dimensions.
+
+## Batching
+
+FastEmbed processes documents in batches for efficiency:
+
+```typescript
+const embedder = fastembed({
+  batchSize: 32, // Process 32 at a time
+});
+
+// Automatically batches internally
+const result = await embedder(arrayOf100Documents);
+```
+
+Default batch size is determined by FastEmbed's internal optimization.
+
+## Performance Tips
+
+**Choose the Right Model**
+
+Smaller models (384 dims) are faster. Larger models (768-1024 dims) are more accurate.
+
+**Adjust Batch Size**
+
+Larger batches are faster but use more memory. Default is usually optimal.
+
+**Cache Models Locally**
+
+Store models in a persistent location to avoid re-downloading:
+
+```typescript
+const embedder = fastembed({
+  cacheDir: './models',
+});
+```
+
+**Reuse Embedder Instances**
+
+Create embedder once and reuse:
+
+```typescript
+const embedder = fastembed();
+
+// Reuse for multiple operations
+await ingest({ connector: source1, store, embedder });
+await ingest({ connector: source2, store, embedder });
+await similaritySearch('query', { connector: source1, store, embedder });
+```
+
+## Model Lazy Loading
+
+FastEmbed uses lazy loading for efficiency:
+
+```typescript
+const embedder = fastembed(); // Model not loaded yet
+
+// Model loads on first use
+const result = await embedder(['text']); // Downloads/loads model
+
+// Subsequent calls reuse loaded model
+const result2 = await embedder(['more text']); // Instant
+```
+
+The model remains in memory for the lifetime of the embedder.
+
+## Error Handling
+
+```typescript
+try {
+  const embedder = fastembed({ model: 'BGESmallENV15' });
+  const result = await embedder(['document text']);
+  console.log('Embedding successful');
+} catch (error) {
+  console.error('Embedding failed:', error);
+}
+```
+
+Common errors:
+- Model download failure (network issues)
+- Insufficient memory (large models)
+- Invalid input (empty strings, non-text data)
+
+## Comparing Models
+
+| Model | Dimensions | Speed | Quality | Use Case |
+|-------|-----------|-------|---------|----------|
+| BGESmallENV15 | 384 | Fast | Good | General purpose |
+| BGEBaseENV15 | 768 | Medium | Better | Higher quality |
+| AllMiniLML6V2 | 384 | Fast | Good | Lightweight |
+| MLE5Large | 1024 | Slow | Best | Maximum quality |
+| BGESmallZH | 512 | Fast | Good | Chinese text |
+
+## Example: Complete Setup
+
+```typescript
+import Database from 'better-sqlite3';
+import { fastembed, SqliteStore, ingest, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// 1. Create embedder with custom config
+const embedder = fastembed({
+  model: 'BGESmallENV15',
+  cacheDir: './models',
+  batchSize: 32,
+});
+
+// 2. Create store with matching dimensions
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+
+// 3. Ingest documents
+await ingest({
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+// 4. Search
+const results = await similaritySearch('installation guide', {
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+console.log(`Found ${results.length} results`);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Use embeddings for ingestion
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Search with embeddings
+  </Card>
+  <Card title="Vector Store" icon="database" href="/retrieval/api/stores">
+    Learn about SQLite vector storage
+  </Card>
+</CardGroup>

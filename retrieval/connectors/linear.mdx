@@ -1,0 +1,432 @@
+---
+title: 'Linear Issues Connector'
+description: 'Ingest issues from Linear workspace'
+---
+
+# Linear Issues Connector
+
+The Linear connector ingests issues assigned to the authenticated user from their Linear workspace.
+
+## Import
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Ingest assigned issues
+await ingest({
+  connector: linear(process.env.LINEAR_API_KEY),
+  store,
+  embedder,
+});
+```
+
+## Configuration
+
+```typescript
+function linear(apiKey: string): Connector
+```
+
+### API Key
+
+Linear API key for authentication:
+
+```typescript
+const connector = linear('lin_api_...');
+```
+
+Get your API key from:
+- Linear Settings → API
+- https://linear.app/settings/api
+
+### Environment Variable
+
+Store API key in environment:
+
+```bash
+# .env
+LINEAR_API_KEY=lin_api_...
+```
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+
+const connector = linear(process.env.LINEAR_API_KEY!);
+```
+
+## Source ID
+
+```typescript
+const connector = linear(apiKey);
+console.log(connector.sourceId);
+// "linear:workspace"
+```
+
+All Linear issues share the same source ID.
+
+## Instructions
+
+The connector includes AI agent instructions:
+
+```typescript
+connector.instructions = 'You answer questions about Linear issues assigned to the user.';
+```
+
+These instructions provide context for AI agents.
+
+## Issue Format
+
+Each issue is ingested as:
+
+```
+Issue: {title}
+Description: {description or 'No description'}
+Status: {state.name or 'Unknown'}
+ID: {id}
+```
+
+### Example
+
+```
+Issue: Fix login bug on mobile
+Description: Users unable to login on iOS Safari
+Status: In Progress
+ID: ISS-123
+```
+
+## Document IDs
+
+Document IDs are Linear issue IDs:
+
+```typescript
+for await (const doc of connector.sources()) {
+  console.log(doc.id);
+  // "ISS-123"
+  // "ISS-124"
+  // "ISS-125"
+}
+```
+
+## Fetched Issues
+
+The connector fetches:
+
+- **User**: Authenticated user (viewer)
+- **Issues**: All issues assigned to the user
+- **State**: Current state of each issue
+
+## Linear SDK
+
+Uses the official Linear SDK:
+
+```typescript
+import { LinearClient } from '@linear/sdk';
+
+const linearClient = new LinearClient({ apiKey });
+const user = await linearClient.viewer;
+const issues = await user.assignedIssues();
+```
+
+## Examples
+
+### Search Assigned Issues
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = linear(process.env.LINEAR_API_KEY!);
+
+// Ingest
+await ingest({ connector, store, embedder });
+
+// Search
+const results = await similaritySearch(
+  'What bugs are assigned to me?',
+  { connector, store, embedder }
+);
+
+results.forEach(result => {
+  console.log(result.content);
+});
+```
+
+### Filter by Status
+
+Search results can be filtered by status:
+
+```typescript
+const results = await similaritySearch(
+  'authentication issues',
+  { connector, store, embedder }
+);
+
+const inProgress = results.filter(r => 
+  r.content.includes('Status: In Progress')
+);
+```
+
+### Re-ingest for Updates
+
+Re-ingest to get updated issue states:
+
+```typescript
+// Initial ingestion
+await ingest({ connector, store, embedder });
+
+// Later, after issues change
+await ingest({ connector, store, embedder });
+```
+
+Only changed issues are re-processed.
+
+## Issue Fields
+
+The connector fetches:
+
+- `id` - Issue identifier
+- `title` - Issue title
+- `description` - Issue description (optional)
+- `state.name` - Current state name
+
+Other fields (assignee, labels, etc.) are not included.
+
+## Limitations
+
+### Only Assigned Issues
+
+Only issues assigned to the authenticated user are fetched.
+
+To fetch all issues, you would need to modify the connector:
+
+```typescript
+// Custom implementation
+const allIssues = await linearClient.issues();
+```
+
+### No Filtering
+
+All assigned issues are fetched. No filtering by:
+- Team
+- Project
+- Status
+- Labels
+
+### No Comments
+
+Issue comments are not included.
+
+### No Attachments
+
+Attachments are not fetched.
+
+## Error Handling
+
+### Invalid API Key
+
+```typescript
+try {
+  await ingest({
+    connector: linear('invalid-key'),
+    store,
+    embedder,
+  });
+} catch (error) {
+  console.error('Linear API error:', error);
+}
+```
+
+### Network Errors
+
+```typescript
+try {
+  const connector = linear(apiKey);
+  await ingest({ connector, store, embedder });
+} catch (error) {
+  console.error('Failed to fetch issues:', error);
+}
+```
+
+## Performance
+
+### API Calls
+
+Two API calls per ingestion:
+1. Fetch authenticated user
+2. Fetch assigned issues
+
+### Issue Count
+
+All assigned issues are fetched in a single request.
+
+For large issue counts, this may be slow.
+
+## Metadata
+
+The connector does not include custom metadata:
+
+```typescript
+{
+  id: issue.id,
+  content: async () => `Issue: ${issue.title}...`,
+  // metadata: undefined
+}
+```
+
+You could modify the connector to add metadata:
+
+```typescript
+{
+  id: issue.id,
+  content: async () => content,
+  metadata: {
+    status: state?.name,
+    url: issue.url,
+  },
+}
+```
+
+## Custom Implementation
+
+Extend the connector for more features:
+
+```typescript
+import { LinearClient } from '@linear/sdk';
+import type { Connector } from '@deepagents/retrieval/connectors';
+
+export function customLinear(apiKey: string): Connector {
+  const linearClient = new LinearClient({ apiKey });
+  
+  return {
+    sourceId: 'linear:custom',
+    instructions: 'Custom Linear connector',
+    
+    sources: async function* () {
+      // Fetch all issues, not just assigned
+      const allIssues = await linearClient.issues();
+      
+      for (const issue of allIssues.nodes) {
+        const state = await issue.state;
+        const assignee = await issue.assignee;
+        
+        yield {
+          id: issue.id,
+          content: async () => `
+Issue: ${issue.title}
+Description: ${issue.description || 'No description'}
+Status: ${state?.name || 'Unknown'}
+Assignee: ${assignee?.name || 'Unassigned'}
+ID: ${issue.id}
+          `,
+          metadata: {
+            status: state?.name,
+            assignee: assignee?.name,
+            url: issue.url,
+          },
+        };
+      }
+    },
+  };
+}
+```
+
+## Automatic Updates
+
+For real-time updates, re-ingest periodically:
+
+```typescript
+const connector = linear(apiKey);
+
+// Re-ingest every hour
+setInterval(async () => {
+  await ingest({ connector, store, embedder });
+  console.log('Issues updated');
+}, 60 * 60 * 1000);
+```
+
+## Integration with Agents
+
+Use with AI agents:
+
+```typescript
+import { agent } from '@deepagents/agent';
+import { linear } from '@deepagents/retrieval/connectors';
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = linear(apiKey);
+await ingest({ connector, store, embedder });
+
+const issueAgent = agent({
+  name: 'Issue Assistant',
+  instructions: connector.instructions,
+  tools: {
+    searchIssues: async (query: string) => {
+      const results = await similaritySearch(query, {
+        connector,
+        store,
+        embedder,
+      });
+      return results.map(r => r.content).join('\n\n');
+    },
+  },
+});
+```
+
+## Best Practices
+
+**Secure API Keys**
+
+Store API keys in environment variables, not source code:
+
+```typescript
+const connector = linear(process.env.LINEAR_API_KEY!);
+```
+
+**Re-ingest Regularly**
+
+Issues change frequently. Re-ingest to stay current:
+
+```typescript
+setInterval(() => ingest({ connector, store, embedder }), 3600000);
+```
+
+**Include Metadata**
+
+Modify connector to include useful metadata for filtering.
+
+**Handle Missing Descriptions**
+
+The connector handles missing descriptions:
+
+```typescript
+description || 'No description'
+```
+
+**Check Permissions**
+
+Ensure API key has permission to read issues.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub Connector" icon="github" href="/retrieval/connectors/github">
+    Ingest from GitHub
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Search ingested issues
+  </Card>
+  <Card title="Custom Connectors" icon="code" href="/retrieval/connectors">
+    Create custom connectors
+  </Card>
+</CardGroup>

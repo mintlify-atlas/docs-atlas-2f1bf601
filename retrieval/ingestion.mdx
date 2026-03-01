@@ -1,0 +1,335 @@
+---
+title: 'Document Ingestion'
+description: 'Ingest and process documents for semantic search'
+---
+
+# Document Ingestion
+
+Ingestion is the process of loading content from a connector, splitting it into chunks, generating embeddings, and storing them for later retrieval.
+
+## Basic Ingestion
+
+```typescript
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+await ingest({
+  connector: local('**/*.md'),
+  store,
+  embedder,
+});
+```
+
+## Ingestion Process
+
+The ingestion pipeline performs these steps:
+
+1. **Fetch Content** - Connector yields documents with id, content, and metadata
+2. **Content Hashing** - Generate SHA-256 hash (CID) to detect changes
+3. **Skip Unchanged** - Skip documents with matching CID (no changes)
+4. **Split into Chunks** - Use text splitter to break content into smaller pieces
+5. **Generate Embeddings** - Create vector embeddings for each chunk
+6. **Store Vectors** - Save embeddings and metadata to SQLite
+
+## Configuration Options
+
+```typescript
+export interface IngestionConfig {
+  connector: Connector;      // Source of documents
+  store: Store;             // Vector storage backend
+  embedder: Embedder;       // Embedding function
+  splitter?: Splitter;      // Optional custom text splitter
+}
+```
+
+### Connector
+
+Any connector that implements the `Connector` interface:
+
+```typescript
+await ingest({
+  connector: local('**/*.md'),
+  // ... other config
+});
+```
+
+See [Connectors](/retrieval/connectors) for available options.
+
+### Store
+
+The vector store where embeddings are saved:
+
+```typescript
+import { SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384); // Must match embedder dimensions
+```
+
+### Embedder
+
+Function that converts text to vector embeddings:
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+const embedder = fastembed({
+  model: 'BGESmallENV15', // 384 dimensions
+});
+```
+
+### Splitter (Optional)
+
+Custom text splitting function:
+
+```typescript
+import { splitTypeScript } from '@deepagents/retrieval';
+
+await ingest({
+  connector: local('**/*.ts'),
+  store,
+  embedder,
+  splitter: splitTypeScript, // TypeScript-aware splitting
+});
+```
+
+## Text Splitting
+
+By default, ingestion uses `MarkdownTextSplitter` from LangChain:
+
+```typescript
+// Default splitter
+function split(id: string, content: string) {
+  const splitter = new MarkdownTextSplitter();
+  return splitter.splitText(content);
+}
+```
+
+### TypeScript Splitting
+
+For code files, use language-aware splitting:
+
+```typescript
+import { splitTypeScript } from '@deepagents/retrieval';
+
+const splitter = splitTypeScript;
+
+await ingest({
+  connector: local('src/**/*.ts'),
+  store,
+  embedder,
+  splitter,
+});
+```
+
+The TypeScript splitter:
+- Uses recursive character splitting with 512 character chunks
+- Includes 100 character overlap between chunks
+- Preserves code structure and context
+
+### Custom Splitting
+
+Create your own splitter:
+
+```typescript
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+
+const customSplitter = async (id: string, content: string) => {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+  });
+  return await splitter.splitText(content);
+};
+
+await ingest({
+  connector: local('**/*.txt'),
+  store,
+  embedder,
+  splitter: customSplitter,
+});
+```
+
+## Change Detection
+
+Ingestion automatically detects content changes using SHA-256 hashing:
+
+```typescript
+import { cid } from '@deepagents/retrieval';
+
+// Content ID (CID) is a SHA-256 hash
+const contentId = cid('file content here');
+// "bafkreih..."
+```
+
+When a document is ingested:
+1. Calculate CID from content
+2. Compare with stored CID
+3. Skip if CID matches (no changes)
+4. Re-process if CID differs (content changed)
+
+This ensures efficient re-ingestion:
+
+```typescript
+// First run: processes all files
+await ingest({ connector, store, embedder });
+
+// Second run: only processes changed files
+await ingest({ connector, store, embedder });
+```
+
+## Ingestion Strategies
+
+Connectors can specify when to ingest using `ingestWhen`:
+
+### contentChanged (Default)
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged', // Re-ingest if content changed
+});
+```
+
+Always attempts ingestion. Skips unchanged documents via CID comparison.
+
+### never
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'never', // Only ingest if source doesn't exist
+});
+```
+
+Only ingests if the source has never been ingested before.
+
+### expired
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+});
+```
+
+Only ingests if the source doesn't exist or has expired.
+
+## Batching
+
+Ingestion automatically batches embeddings to control memory usage:
+
+```typescript
+const batchSize = 40; // Default batch size
+
+for (let i = 0; i < chunks.length; i += batchSize) {
+  const batch = chunks.slice(i, i + batchSize);
+  const { embeddings } = await embedder(batch);
+  // Store batch...
+}
+```
+
+This prevents memory issues when processing large documents.
+
+## Progress Tracking
+
+Track ingestion progress with a callback:
+
+```typescript
+await ingest(
+  {
+    connector: local('**/*.md'),
+    store,
+    embedder,
+  },
+  (documentId) => {
+    console.log(`Processing: ${documentId}`);
+  }
+);
+```
+
+The callback receives the document ID for each processed document.
+
+## Multiple Sources
+
+Ingest from multiple connectors:
+
+```typescript
+import { github, local, rss } from '@deepagents/retrieval/connectors';
+
+const sources = [
+  github.file('facebook/react/README.md'),
+  local('docs/**/*.md'),
+  rss('https://blog.example.com/feed.xml'),
+];
+
+for (const connector of sources) {
+  await ingest({ connector, store, embedder });
+  console.log(`Ingested: ${connector.sourceId}`);
+}
+```
+
+Each connector has a unique `sourceId` for tracking.
+
+## Error Handling
+
+```typescript
+try {
+  await ingest({
+    connector: local('**/*.md'),
+    store,
+    embedder,
+  });
+  console.log('Ingestion complete');
+} catch (error) {
+  console.error('Ingestion failed:', error);
+}
+```
+
+Ingestion skips empty files automatically:
+
+```typescript
+if (!content.trim()) {
+  continue; // Skip empty files
+}
+```
+
+## Best Practices
+
+**Choose Appropriate Chunk Sizes**
+
+Smaller chunks (512 chars) for code, larger chunks (1000+ chars) for prose.
+
+**Use Language-Aware Splitting**
+
+For code files, use language-specific splitters like `splitTypeScript`.
+
+**Batch Large Jobs**
+
+Ingestion automatically batches, but you can also batch connector sources.
+
+**Track Progress**
+
+Use the progress callback for long-running ingestion jobs.
+
+**Handle Errors Gracefully**
+
+Wrap ingestion in try-catch and log failures without stopping the entire job.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Connectors" icon="plug" href="/retrieval/connectors">
+    Explore available data connectors
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Search ingested content
+  </Card>
+  <Card title="Embeddings" icon="brain" href="/retrieval/embeddings">
+    Learn about embedding models
+  </Card>
+</CardGroup>

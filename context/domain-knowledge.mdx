@@ -1,0 +1,501 @@
+---
+title: 'Domain Knowledge Fragments'
+description: 'Capture domain-specific knowledge with terms, hints, guardrails, and more'
+---
+
+## Overview
+
+Domain fragments capture domain-specific knowledge that can be injected into AI prompts. They help the AI understand your business vocabulary, rules, constraints, and processes.
+
+## Fragment Types
+
+<CardGroup cols={2}>
+  <Card title="term" icon="book-open">
+    Define business vocabulary and acronyms
+  </Card>
+  <Card title="hint" icon="lightbulb">
+    Behavioral rules and constraints
+  </Card>
+  <Card title="guardrail" icon="shield">
+    Safety rules and boundaries
+  </Card>
+  <Card title="explain" icon="comment">
+    Rich concept explanations with metaphors
+  </Card>
+  <Card title="example" icon="code">
+    Question-answer pairs for few-shot learning
+  </Card>
+  <Card title="clarification" icon="circle-question">
+    When to ask users for more information
+  </Card>
+  <Card title="workflow" icon="diagram-project">
+    Multi-step processes and methodologies
+  </Card>
+  <Card title="quirk" icon="bug">
+    Data edge cases and workarounds
+  </Card>
+  <Card title="styleGuide" icon="paintbrush">
+    Style preferences and coding standards
+  </Card>
+  <Card title="analogy" icon="scale-balanced">
+    Concept comparisons through analogies
+  </Card>
+  <Card title="glossary" icon="list">
+    Map terms to SQL expressions
+  </Card>
+</CardGroup>
+
+## term()
+
+Define business vocabulary and terminology.
+
+```typescript
+function term(name: string, definition: string): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { term } from '@deepagents/context';
+
+// Finance domain
+term('NPL', 'non-performing loan - loan past due 90+ days');
+term('basis points', 'one hundredth of a percentage point (1% = 100 bps)');
+term('AUM', 'assets under management - total market value of client investments');
+
+// Logistics domain
+term('deadhead miles', 'distance driven with empty truck between deliveries');
+term('dwell time', 'total time a truck spends at a loading dock or warehouse');
+term('LTL', 'less than truckload - shipment that doesn\'t fill entire truck');
+```
+
+<Tip>
+Use `term()` for simple, direct mappings between business terms and their meanings. For more complex explanations, use `explain()`.
+</Tip>
+
+## hint()
+
+Define behavioral rules and constraints that should always apply.
+
+```typescript
+function hint(text: string): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { hint } from '@deepagents/context';
+
+// Manufacturing domain
+hint('Always exclude work orders with status = "simulation" from production metrics');
+hint('When calculating OEE, only count scheduled production time');
+hint('Defect rates should be calculated per batch, not per individual unit');
+
+// Real Estate domain
+hint('Never include properties with listing_status = "draft" in market analysis');
+hint('Always filter out duplicate MLS listings');
+hint('Square footage comparisons must specify if including basement/garage');
+```
+
+<Note>
+Hints use imperative language ("Always exclude...", "Never include...") to make the rule clear and actionable.
+</Note>
+
+## guardrail()
+
+Define hard guardrails, safety rules, and compliance boundaries.
+
+```typescript
+function guardrail(input: {
+  rule: string;
+  reason?: string;
+  action?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { guardrail } from '@deepagents/context';
+
+// Healthcare
+guardrail({
+  rule: 'Never return PHI like SSN, MRN, or full address',
+  reason: 'HIPAA compliance',
+  action: 'Offer de-identified aggregates instead',
+});
+
+// Finance
+guardrail({
+  rule: 'Block any query exposing employee-level compensation by name',
+  reason: 'Confidential payroll data',
+  action: 'Provide ranges grouped by department or level',
+});
+
+// Performance
+guardrail({
+  rule: 'Warn when query would scan more than 10M rows',
+  reason: 'Performance and cost control',
+  action: 'Ask user to add filters before proceeding',
+});
+```
+
+<Warning>
+Guardrails represent "never do" rules. They should be explicit and include an `action` field explaining what to do instead.
+</Warning>
+
+## explain()
+
+Define rich understanding of concepts using metaphors and explanations.
+
+```typescript
+function explain(input: {
+  concept: string;
+  explanation: string;
+  therefore?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { explain } from '@deepagents/context';
+
+// Gaming domain
+explain({
+  concept: 'DAU to MAU ratio',
+  explanation: 'like measuring how many club members visit daily vs just once a month - shows stickiness',
+  therefore: 'Calculate as DAU / MAU, where higher ratio means more engaged user base',
+});
+
+// HR domain
+explain({
+  concept: 'time to fill',
+  explanation: 'like measuring how long a house sits on the market - from posting job to accepting offer',
+  therefore: 'Calculate as days between job_posted_date and offer_accepted_date',
+});
+```
+
+<Tip>
+Use `explain()` when a simple definition isn't enough. The `explanation` field should use analogies or metaphors to convey deeper understanding.
+</Tip>
+
+## example()
+
+Define concrete question-answer pairs for few-shot learning.
+
+```typescript
+function example(input: {
+  question: string;
+  answer: string;
+  note?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { example } from '@deepagents/context';
+
+// Energy domain
+example({
+  question: 'show me peak demand hours for the last week',
+  answer: 'SELECT DATE_TRUNC(\'hour\', timestamp) as hour, MAX(kwh) as peak FROM readings WHERE timestamp >= CURRENT_DATE - 7 GROUP BY hour ORDER BY peak DESC LIMIT 10',
+});
+
+// Agriculture domain
+example({
+  question: 'what is the average yield per acre by crop type this season',
+  answer: 'SELECT crop_type, AVG(harvest_quantity / field_acres) as yield_per_acre FROM harvests WHERE harvest_date >= \'2024-01-01\' GROUP BY crop_type',
+});
+
+// Travel domain
+example({
+  question: 'show me hotel occupancy rate for this month',
+  answer: 'SELECT hotel_name, (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate FROM daily_occupancy WHERE date >= DATE_TRUNC(\'month\', CURRENT_DATE) GROUP BY hotel_id, hotel_name',
+  note: 'Occupancy rate is a percentage - multiply by 100',
+});
+```
+
+## clarification()
+
+Define when and what to ask for clarification.
+
+```typescript
+function clarification(input: {
+  when: string;
+  ask: string;
+  reason: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { clarification } from '@deepagents/context';
+
+// Marketing domain
+clarification({
+  when: 'user asks for "conversion rate"',
+  ask: 'Which conversion: click-to-lead, lead-to-opportunity, or opportunity-to-customer?',
+  reason: 'Conversion rate means different things at each funnel stage',
+});
+
+// Food Delivery
+clarification({
+  when: 'user asks about "delivery time"',
+  ask: 'Do you mean estimated time at order, actual delivery time, or time from kitchen to door?',
+  reason: 'Multiple time metrics exist with different business implications',
+});
+```
+
+## workflow()
+
+Define multi-step analytical processes.
+
+```typescript
+function workflow(input: {
+  task: string;
+  steps: string[];
+  triggers?: string[];
+  notes?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+// Insurance domain
+workflow({
+  task: 'Claims Loss Ratio Analysis',
+  triggers: ['loss ratio', 'claims ratio', 'underwriting performance'],
+  steps: [
+    'Calculate total claims paid for each policy period',
+    'Calculate total premiums earned for same period',
+    'Compute loss ratio as (claims_paid / premiums_earned) * 100',
+    'Segment by policy type, geography, and underwriter',
+    'Identify policies with loss ratio > 100% (losing money)',
+    'Calculate trend over time using rolling 12-month windows',
+  ],
+  notes: 'Use incurred date for claims, not paid date',
+});
+
+// Sports Analytics
+workflow({
+  task: 'Player Performance Rating',
+  triggers: ['player rating', 'performance score'],
+  steps: [
+    'Aggregate per-game stats: points, assists, rebounds',
+    'Calculate efficiency metrics: shooting %, plus/minus',
+    'Normalize each metric using z-scores vs league average',
+    'Apply position-specific weights to each metric',
+    'Combine weighted scores into overall rating (0-100)',
+    'Rank players within position group',
+  ],
+  notes: 'Update weights each season based on game trends',
+});
+```
+
+## quirk()
+
+Document data quirks, edge cases, and workarounds.
+
+```typescript
+function quirk(input: {
+  issue: string;
+  workaround: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { quirk } from '@deepagents/context';
+
+// Government domain
+quirk({
+  issue: 'Citizen IDs contain leading zeros but stored as integers',
+  workaround: 'Use LPAD(citizen_id::VARCHAR, 10, \'0\') to restore zeros',
+});
+
+// Aviation domain
+quirk({
+  issue: 'Flight times crossing midnight show as negative duration',
+  workaround: 'Add 24 hours when duration < 0: CASE WHEN duration < 0 THEN duration + INTERVAL \'24 hours\' END',
+});
+
+// Automotive domain
+quirk({
+  issue: 'VIN numbers with letter O incorrectly entered as zero in legacy data',
+  workaround: 'Use REPLACE(vin, \'0\', \'O\') or fuzzy matching for both cases',
+});
+```
+
+## styleGuide()
+
+Define style preferences and coding standards.
+
+```typescript
+function styleGuide(input: {
+  prefer: string;
+  never?: string;
+  always?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { styleGuide } from '@deepagents/context';
+
+// Non-profit domain
+styleGuide({
+  prefer: 'Use donor-centric language: "donor_name" not "customer_name"',
+  never: 'Never expose internal donor IDs in external reports',
+  always: 'Always include fiscal year (FY starts July 1)',
+});
+
+// Legal domain
+styleGuide({
+  prefer: 'Use billable_hours with 2 decimal precision',
+  never: 'Never include attorney_rate in paralegal-visible queries',
+  always: 'Always filter by matter_status = "open" unless analyzing closed cases',
+});
+```
+
+## analogy()
+
+Define comparisons between related concepts.
+
+```typescript
+function analogy(input: {
+  concepts: string[];
+  relationship: string;
+  insight?: string;
+  therefore?: string;
+  pitfall?: string;
+}): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { analogy } from '@deepagents/context';
+
+// E-commerce
+analogy({
+  concepts: ['cart abandonment', 'browse abandonment'],
+  relationship: 'Cart abandonment is like leaving items at checkout, browse is like window shopping',
+  insight: 'Cart shows purchase intent (added items), browse shows only interest',
+  therefore: 'Prioritize cart abandonment recovery - higher conversion potential',
+  pitfall: 'Don\'t combine into generic "abandonment rate" - need different strategies',
+});
+
+// SaaS
+analogy({
+  concepts: ['logo churn', 'revenue churn'],
+  relationship: 'Logo churn counts customers who left, revenue churn measures money lost',
+  insight: 'Losing 10 small customers might hurt less than 1 enterprise customer',
+  therefore: 'Report both - logo for satisfaction, revenue for financial health',
+  pitfall: 'Don\'t use logo churn to predict revenue impact',
+});
+```
+
+## glossary()
+
+Map business terms to SQL expressions.
+
+```typescript
+function glossary(entries: Record<string, string>): ContextFragment
+```
+
+### Usage
+
+```typescript
+import { glossary } from '@deepagents/context';
+
+glossary({
+  'revenue': 'SUM(orders.total_amount)',
+  'average order value': 'AVG(orders.total_amount)',
+  'active user': 'last_login > NOW() - INTERVAL \'30 days\'',
+  'churned': 'status = \'churned\'',
+  'power user': 'order_count > 10',
+  'net revenue': 'SUM(orders.total_amount) - SUM(refunds.amount)',
+});
+```
+
+<Note>
+**Glossary vs Alias:**
+- `glossary()` maps terms to SQL expressions ("revenue" → "SUM(amount)")
+- `alias()` maps user vocabulary to column names ("the big table" → "orders")
+
+In short: glossary computes, alias renames.
+</Note>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use the Right Fragment Type">
+    Choose the fragment type that best matches your intent:
+    - **term**: Simple vocabulary
+    - **hint**: Behavioral rules
+    - **guardrail**: Safety boundaries
+    - **example**: Concrete demonstrations
+    - **workflow**: Multi-step processes
+  </Accordion>
+  
+  <Accordion title="Be Specific and Actionable">
+    Write clear, actionable content:
+    
+    ```typescript
+    // Good: Specific and actionable
+    hint('Always exclude orders with status = "test" from revenue calculations');
+    
+    // Avoid: Vague
+    hint('Be careful with test data');
+    ```
+  </Accordion>
+  
+  <Accordion title="Include Context in Guardrails">
+    Always provide `reason` and `action` fields:
+    
+    ```typescript
+    guardrail({
+      rule: 'Never expose PII',
+      reason: 'GDPR compliance',
+      action: 'Aggregate or anonymize data instead',
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Analogies for Complex Concepts">
+    When explaining complex metrics, use real-world analogies:
+    
+    ```typescript
+    explain({
+      concept: 'churn rate',
+      explanation: 'like a leaky bucket - measures how fast you lose customers vs gain new ones',
+      therefore: 'Calculate as (customers_lost / total_customers_start) * 100',
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="User Context" icon="user" href="/context/user-context">
+    Add user-specific context and preferences
+  </Card>
+  <Card title="Messages" icon="message" href="/context/messages">
+    Work with conversation messages
+  </Card>
+  <Card title="Renderers" icon="code" href="/context/renderers">
+    Transform fragments into different formats
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/context/api/fragment-builders">
+    Complete fragment builder API
+  </Card>
+</CardGroup>

@@ -1,0 +1,386 @@
+---
+title: evaluate()
+description: API reference for the evaluate() function
+---
+
+# evaluate()
+
+The `evaluate()` function is the main entry point for running evaluations.
+
+## Import
+
+```typescript
+import { evaluate } from '@deepagents/evals';
+```
+
+## Signature
+
+```typescript
+function evaluate<T>(
+  options: EvaluateOptions<T>
+): EvalBuilder<RunSummary>;
+
+function evaluate<T, V extends { name: string }>(
+  options: EvaluateEachOptions<T, V>
+): EvalBuilder<RunSummary[]>;
+```
+
+## Options
+
+### `EvaluateOptions<T>`
+
+Evaluate a single model:
+
+```typescript
+interface EvaluateOptions<T> {
+  name: string;
+  model: string;
+  dataset: AsyncIterable<T>;
+  task: TaskFn<T>;
+  scorers: Record<string, Scorer>;
+  reporters: Reporter[];
+  store: RunStore;
+  suiteId?: string;
+  maxConcurrency?: number;
+  timeout?: number;
+  trials?: number;
+  threshold?: number;
+}
+```
+
+#### `name`
+
+Human-readable name for the evaluation run.
+
+```typescript
+name: 'my-eval'
+```
+
+#### `model`
+
+Model identifier (passed to reporters and stored in the database).
+
+```typescript
+model: 'gpt-4o'
+```
+
+#### `dataset`
+
+Dataset of input/expected pairs. See [Datasets](/evals/datasets).
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+
+dataset: dataset([
+  { input: 'What is 2+2?', expected: '4' },
+])
+```
+
+#### `task`
+
+Function that calls your model and returns the output.
+
+```typescript
+task: async (item) => {
+  const response = await callMyLLM(item.input);
+  return {
+    output: response,
+    usage: { inputTokens: 10, outputTokens: 5 },
+  };
+}
+```
+
+**Type:**
+
+```typescript
+type TaskFn<T> = (input: T) => Promise<TaskResult>;
+
+interface TaskResult {
+  output: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+```
+
+#### `scorers`
+
+Named scoring functions. See [Scorers](/evals/scorers).
+
+```typescript
+import { exactMatch, includes } from '@deepagents/evals/scorers';
+
+scorers: {
+  exact: exactMatch,
+  contains: includes,
+}
+```
+
+#### `reporters`
+
+Reporters that receive lifecycle events and produce output.
+
+```typescript
+import { consoleReporter } from '@deepagents/evals/reporters';
+
+reporters: [consoleReporter({ verbosity: 'normal' })]
+```
+
+#### `store`
+
+Persistent store for run history.
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+store: new RunStore('.evals/store.db')
+```
+
+#### `suiteId` (optional)
+
+Associate this run with an existing suite ID.
+
+```typescript
+const suite = store.createSuite('text2sql-accuracy');
+suiteId: suite.id
+```
+
+If omitted, a new suite is created with the `name`.
+
+#### `maxConcurrency` (optional)
+
+Maximum number of cases to run concurrently.
+
+```typescript
+maxConcurrency: 10  // Default: 10
+```
+
+#### `timeout` (optional)
+
+Per-case timeout in milliseconds.
+
+```typescript
+timeout: 30_000  // Default: 30000 (30 seconds)
+```
+
+#### `trials` (optional)
+
+Number of times to run each case and average the scores.
+
+```typescript
+trials: 3  // Run each case 3 times
+```
+
+#### `threshold` (optional)
+
+Minimum average score (0–1) required for a case to pass.
+
+```typescript
+threshold: 0.5  // Default: 0.5
+```
+
+### `EvaluateEachOptions<T, V>`
+
+Evaluate multiple model variants:
+
+```typescript
+interface EvaluateEachOptions<T, V extends { name: string }> {
+  name: string;
+  models: V[];
+  dataset: AsyncIterable<T>;
+  task: (input: T, variant: V) => Promise<TaskResult>;
+  scorers: Record<string, Scorer>;
+  reporters: Reporter[];
+  store: RunStore;
+  maxConcurrency?: number;
+  timeout?: number;
+  trials?: number;
+  threshold?: number;
+}
+```
+
+#### `models`
+
+Array of model variants. Each variant must have a `name` property:
+
+```typescript
+models: [
+  { name: 'gpt-4o', temperature: 0.7 },
+  { name: 'gpt-4o-mini', temperature: 0.7 },
+]
+```
+
+#### `task`
+
+Task function receives both the input and the current variant:
+
+```typescript
+task: async (input, variant) => {
+  const response = await callMyLLM(input.input, variant);
+  return { output: response };
+}
+```
+
+## Return Value
+
+The `evaluate()` function returns an `EvalBuilder` that implements `PromiseLike`, so you can `await` it directly:
+
+```typescript
+const summary = await evaluate(options);
+```
+
+Or use the builder methods:
+
+### `failed()`
+
+Run only cases that failed in the previous run:
+
+```typescript
+await evaluate(options).failed();
+```
+
+### `cases(spec)`
+
+Run specific cases by index:
+
+```typescript
+await evaluate(options).cases('0-10,15,20-25');
+```
+
+**Supported formats:**
+
+- `0-10` — Range from 0 to 10 (inclusive)
+- `5` — Single index
+- `0-10,15,20-25` — Multiple ranges and indexes
+
+### `sample(n)`
+
+Run a random sample of `n` cases:
+
+```typescript
+await evaluate(options).sample(50);
+```
+
+### `assert()`
+
+Throw `EvalAssertionError` if any cases fail:
+
+```typescript
+try {
+  await evaluate(options).assert();
+} catch (err) {
+  if (err instanceof EvalAssertionError) {
+    console.error('Eval failed:', err.summary);
+  }
+}
+```
+
+## Example: Single Model
+
+```typescript
+import { evaluate, dataset, exactMatch } from '@deepagents/evals';
+import { consoleReporter } from '@deepagents/evals/reporters';
+import { RunStore } from '@deepagents/evals/store';
+
+const summary = await evaluate({
+  name: 'my-eval',
+  model: 'gpt-4o',
+  dataset: dataset([
+    { input: 'What is 2+2?', expected: '4' },
+  ]),
+  task: async (item) => {
+    const response = await callMyLLM(item.input);
+    return { output: response };
+  },
+  scorers: { exact: exactMatch },
+  reporters: [consoleReporter()],
+  store: new RunStore(),
+});
+
+console.log(summary);
+```
+
+## Example: Multiple Models
+
+```typescript
+import { evaluate, dataset, exactMatch } from '@deepagents/evals';
+import { consoleReporter } from '@deepagents/evals/reporters';
+import { RunStore } from '@deepagents/evals/store';
+
+const summaries = await evaluate({
+  name: 'model-comparison',
+  models: [
+    { name: 'gpt-4o' },
+    { name: 'gpt-4o-mini' },
+  ],
+  dataset: dataset([
+    { input: 'What is 2+2?', expected: '4' },
+  ]),
+  task: async (item, variant) => {
+    const response = await callMyLLM(item.input, variant.name);
+    return { output: response };
+  },
+  scorers: { exact: exactMatch },
+  reporters: [consoleReporter()],
+  store: new RunStore(),
+});
+
+for (const summary of summaries) {
+  console.log(summary);
+}
+```
+
+## Example: Builder Pattern
+
+```typescript
+// Run only failed cases
+await evaluate(options).failed();
+
+// Run specific cases
+await evaluate(options).cases('0-10,15');
+
+// Run random sample
+await evaluate(options).sample(50);
+
+// Assert no failures
+await evaluate(options).assert();
+
+// Chain methods
+await evaluate(options).cases('0-10').assert();
+```
+
+## Types
+
+### `RunSummary`
+
+```typescript
+interface RunSummary {
+  totalCases: number;
+  passCount: number;
+  failCount: number;
+  meanScores: Record<string, number>;
+  totalLatencyMs: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+}
+```
+
+### `EvalAssertionError`
+
+```typescript
+class EvalAssertionError extends Error {
+  summary: RunSummary | RunSummary[];
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Datasets" icon="database" href="/evals/datasets">
+    Learn about dataset loading
+  </Card>
+  <Card title="Scorers" icon="star" href="/evals/scorers">
+    Explore scorer functions
+  </Card>
+  <Card title="Engine API" icon="cog" href="/evals/api/engine">
+    Lower-level engine API
+  </Card>
+</CardGroup>

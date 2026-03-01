@@ -1,0 +1,537 @@
+---
+title: '@deepagents/orchestrator'
+description: 'High-level orchestration patterns for complex multi-agent workflows'
+---
+
+## Overview
+
+The `@deepagents/orchestrator` package provides high-level patterns and utilities for orchestrating complex multi-agent workflows. It builds on top of `@deepagents/agent` to offer pre-configured agent architectures for common use cases.
+
+## Installation
+
+```bash
+npm install @deepagents/orchestrator
+```
+
+**Dependencies:**
+- `@deepagents/agent`
+- `@deepagents/context`
+- `@deepagents/retrieval`
+- `@deepagents/toolbox`
+- `@ai-sdk/openai`
+- `@ai-sdk/groq`
+- `zod`
+- `ai`
+
+## What is Orchestration?
+
+Orchestration manages:
+- Coordinating multiple specialized agents
+- Managing complex workflows
+- Routing requests to appropriate handlers
+- Aggregating results from multiple sources
+- Handling failures and retries
+
+<Note>
+The orchestrator package provides higher-level abstractions than direct agent composition, making it easier to build production-ready multi-agent systems.
+</Note>
+
+## Core Concepts
+
+### Orchestrator Pattern
+
+A central coordinator that:
+1. Receives user requests
+2. Analyzes requirements
+3. Delegates to specialist agents
+4. Aggregates responses
+5. Returns unified results
+
+```typescript
+import { createOrchestrator } from '@deepagents/orchestrator';
+import { openai } from '@ai-sdk/openai';
+
+const orchestrator = createOrchestrator({
+  name: 'main',
+  model: openai('gpt-4o'),
+  specialists: [
+    researchAgent,
+    analysisAgent,
+    writingAgent,
+  ],
+});
+
+const result = await orchestrator.execute(
+  'Create a comprehensive market analysis report',
+  { userId: 'user123' }
+);
+```
+
+### Pipeline Pattern
+
+Sequential processing through stages:
+
+```typescript
+import { createPipeline } from '@deepagents/orchestrator';
+
+const pipeline = createPipeline([
+  { agent: dataCollector, name: 'collect' },
+  { agent: dataProcessor, name: 'process' },
+  { agent: dataAnalyzer, name: 'analyze' },
+  { agent: reportGenerator, name: 'report' },
+]);
+
+const result = await pipeline.run(initialInput, context);
+```
+
+### Router Pattern
+
+Dynamic routing based on request type:
+
+```typescript
+import { createRouter } from '@deepagents/orchestrator';
+
+const router = createRouter({
+  routes: [
+    {
+      pattern: /code|programming|debug/i,
+      agent: codeAgent,
+    },
+    {
+      pattern: /data|analysis|query/i,
+      agent: dataAgent,
+    },
+    {
+      pattern: /.*/, // Default
+      agent: generalAgent,
+    },
+  ],
+});
+
+const result = await router.route(userMessage, context);
+```
+
+## Built-in Orchestrators
+
+### Research Orchestrator
+
+Coordinates research, analysis, and synthesis:
+
+```typescript
+import { researchOrchestrator } from '@deepagents/orchestrator';
+
+const orchestrator = researchOrchestrator({
+  model: openai('gpt-4o'),
+  searchTool: tavilySearchTool,
+});
+
+const result = await orchestrator.execute(
+  'Research the latest developments in quantum computing',
+  {}
+);
+```
+
+**Workflow:**
+1. **Query Analysis** - Understand research requirements
+2. **Information Gathering** - Search and collect sources
+3. **Synthesis** - Analyze and combine findings
+4. **Report Generation** - Create structured output
+
+### Code Review Orchestrator
+
+Multi-stage code review process:
+
+```typescript
+import { codeReviewOrchestrator } from '@deepagents/orchestrator';
+
+const orchestrator = codeReviewOrchestrator({
+  model: openai('gpt-4o'),
+  checks: ['style', 'security', 'performance', 'tests'],
+});
+
+const review = await orchestrator.review(codeContent, {
+  language: 'typescript',
+  guidelines: customGuidelines,
+});
+```
+
+**Stages:**
+1. **Style Check** - Code formatting and conventions
+2. **Security Analysis** - Vulnerability scanning
+3. **Performance Review** - Optimization opportunities
+4. **Test Coverage** - Test completeness assessment
+
+### Data Pipeline Orchestrator
+
+ETL and data transformation workflows:
+
+```typescript
+import { dataPipelineOrchestrator } from '@deepagents/orchestrator';
+
+const orchestrator = dataPipelineOrchestrator({
+  model: openai('gpt-4o'),
+  stages: [
+    { name: 'extract', agent: extractorAgent },
+    { name: 'transform', agent: transformerAgent },
+    { name: 'validate', agent: validatorAgent },
+    { name: 'load', agent: loaderAgent },
+  ],
+});
+
+const result = await orchestrator.process(rawData, context);
+```
+
+## Workflow Management
+
+### Parallel Execution
+
+Run multiple agents concurrently:
+
+```typescript
+import { parallelExecution } from '@deepagents/orchestrator';
+
+const results = await parallelExecution({
+  agents: [agent1, agent2, agent3],
+  input: userMessage,
+  context,
+  maxConcurrency: 3,
+});
+
+// results = [result1, result2, result3]
+```
+
+### Sequential Execution
+
+Run agents one after another:
+
+```typescript
+import { sequentialExecution } from '@deepagents/orchestrator';
+
+const results = await sequentialExecution({
+  agents: [step1, step2, step3],
+  input: initialData,
+  context,
+  continueOnError: false,
+});
+```
+
+### Conditional Branching
+
+Route based on conditions:
+
+```typescript
+import { conditionalBranch } from '@deepagents/orchestrator';
+
+const result = await conditionalBranch({
+  condition: (input) => input.priority === 'high',
+  trueBranch: urgentAgent,
+  falseBranch: standardAgent,
+  input: userRequest,
+  context,
+});
+```
+
+## Error Handling
+
+### Retry Mechanism
+
+```typescript
+import { withRetry } from '@deepagents/orchestrator';
+
+const resilientAgent = withRetry(baseAgent, {
+  maxRetries: 3,
+  backoff: 'exponential',
+  retryOn: ['timeout', 'rate_limit'],
+});
+
+const result = await resilientAgent.execute(input, context);
+```
+
+### Fallback Strategy
+
+```typescript
+import { withFallback } from '@deepagents/orchestrator';
+
+const robustAgent = withFallback(primaryAgent, {
+  fallbacks: [backupAgent1, backupAgent2],
+  timeout: 30000,
+});
+
+const result = await robustAgent.execute(input, context);
+```
+
+### Circuit Breaker
+
+```typescript
+import { circuitBreaker } from '@deepagents/orchestrator';
+
+const protectedAgent = circuitBreaker(agent, {
+  failureThreshold: 5,
+  timeout: 60000,
+  resetTimeout: 30000,
+});
+```
+
+## State Management
+
+### Workflow State
+
+Track workflow progress:
+
+```typescript
+import { WorkflowState } from '@deepagents/orchestrator';
+
+const state = new WorkflowState({
+  workflowId: 'wf-123',
+  initialData: {},
+});
+
+state.addStep('research', { status: 'pending' });
+state.updateStep('research', { status: 'completed', result: data });
+state.addStep('analysis', { status: 'in_progress' });
+
+const progress = state.getProgress();
+console.log(`${progress.completed}/${progress.total} steps complete`);
+```
+
+### Context Persistence
+
+Save and restore workflow context:
+
+```typescript
+import { persistContext, restoreContext } from '@deepagents/orchestrator';
+import { SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./workflows.db');
+
+// Save
+await persistContext(store, 'wf-123', workflowContext);
+
+// Restore
+const restored = await restoreContext(store, 'wf-123');
+```
+
+## Monitoring and Observability
+
+### Event Tracking
+
+```typescript
+import { OrchestrationEmitter } from '@deepagents/orchestrator';
+
+const emitter = new OrchestrationEmitter();
+
+emitter.on('workflow:start', ({ workflowId, name }) => {
+  console.log(`Started: ${name} (${workflowId})`);
+});
+
+emitter.on('agent:execute', ({ agentName, input }) => {
+  console.log(`Executing: ${agentName}`);
+});
+
+emitter.on('agent:complete', ({ agentName, duration }) => {
+  console.log(`Completed: ${agentName} in ${duration}ms`);
+});
+
+emitter.on('workflow:complete', ({ workflowId, result }) => {
+  console.log(`Workflow ${workflowId} complete`);
+});
+
+const orchestrator = createOrchestrator({
+  // ...
+  emitter,
+});
+```
+
+### Metrics Collection
+
+```typescript
+import { collectMetrics } from '@deepagents/orchestrator';
+
+const metrics = collectMetrics(orchestrator);
+
+setInterval(() => {
+  console.log('Metrics:', {
+    totalExecutions: metrics.totalExecutions,
+    avgDuration: metrics.avgDuration,
+    errorRate: metrics.errorRate,
+    activeWorkflows: metrics.activeWorkflows,
+  });
+}, 10000);
+```
+
+## Advanced Patterns
+
+### Fan-Out/Fan-In
+
+Distribute work and aggregate results:
+
+```typescript
+import { fanOut, fanIn } from '@deepagents/orchestrator';
+
+// Fan out to multiple agents
+const results = await fanOut({
+  agents: [analyzer1, analyzer2, analyzer3],
+  input: data,
+  context,
+});
+
+// Fan in to aggregate
+const aggregated = await fanIn({
+  results,
+  aggregatorAgent: synthesisAgent,
+  context,
+});
+```
+
+### Map-Reduce
+
+Process collections in parallel:
+
+```typescript
+import { mapReduce } from '@deepagents/orchestrator';
+
+const result = await mapReduce({
+  items: documents,
+  mapAgent: processorAgent,
+  reduceAgent: summarizerAgent,
+  context,
+  maxConcurrency: 5,
+});
+```
+
+### Saga Pattern
+
+Distributed transactions with compensation:
+
+```typescript
+import { saga } from '@deepagents/orchestrator';
+
+const result = await saga({
+  steps: [
+    {
+      agent: reserveAgent,
+      compensate: releaseAgent,
+    },
+    {
+      agent: chargeAgent,
+      compensate: refundAgent,
+    },
+    {
+      agent: confirmAgent,
+      compensate: cancelAgent,
+    },
+  ],
+  input,
+  context,
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Single Responsibility" icon="bullseye">
+    Each agent should have one clear purpose
+  </Card>
+  <Card title="Idempotency" icon="arrows-rotate">
+    Make operations safe to retry
+  </Card>
+  <Card title="Timeout Management" icon="clock">
+    Set appropriate timeouts for each stage
+  </Card>
+  <Card title="Error Boundaries" icon="shield">
+    Contain failures to prevent cascade
+  </Card>
+  <Card title="State Persistence" icon="database">
+    Save state for long-running workflows
+  </Card>
+  <Card title="Observability" icon="chart-line">
+    Track metrics and events
+  </Card>
+</CardGroup>
+
+## Example: Complete Workflow
+
+```typescript
+import {
+  createOrchestrator,
+  withRetry,
+  persistContext,
+  OrchestrationEmitter,
+} from '@deepagents/orchestrator';
+import { agent } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import { SqliteContextStore } from '@deepagents/context';
+
+// Create specialists
+const dataCollector = agent({
+  name: 'collector',
+  model: openai('gpt-4o'),
+  prompt: 'Collect data from sources.',
+  tools: { search: searchTool },
+});
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze collected data.',
+});
+
+const reporter = agent({
+  name: 'reporter',
+  model: openai('gpt-4o'),
+  prompt: 'Generate comprehensive report.',
+});
+
+// Setup monitoring
+const emitter = new OrchestrationEmitter();
+emitter.on('agent:complete', ({ agentName, duration }) => {
+  console.log(`✓ ${agentName} completed in ${duration}ms`);
+});
+
+// Create orchestrator
+const orchestrator = createOrchestrator({
+  name: 'research_pipeline',
+  model: openai('gpt-4o'),
+  specialists: [
+    withRetry(dataCollector, { maxRetries: 3 }),
+    withRetry(analyzer, { maxRetries: 2 }),
+    reporter,
+  ],
+  emitter,
+});
+
+// Execute workflow
+const workflowId = 'wf-' + Date.now();
+const store = new SqliteContextStore('./workflows.db');
+
+const result = await orchestrator.execute(
+  'Research AI agent frameworks and create comparison',
+  { workflowId }
+);
+
+// Persist final state
+await persistContext(store, workflowId, result.context);
+
+console.log('Workflow complete:', result);
+```
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/orchestrator](https://www.npmjs.com/package/@deepagents/orchestrator)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/agent" icon="robot" href="/packages/agent">
+    Core agent framework
+  </Card>
+  <Card title="@deepagents/context" icon="layer-group" href="/packages/context">
+    Context management
+  </Card>
+  <Card title="@deepagents/toolbox" icon="toolbox" href="/packages/toolbox">
+    Pre-built tools
+  </Card>
+</CardGroup>

@@ -1,0 +1,519 @@
+---
+title: Adapters API Reference
+description: Complete API reference for database adapters
+---
+
+# Adapters API Reference
+
+Complete API documentation for all database adapters and grounding functions.
+
+## Adapter Classes
+
+All adapters extend the `Adapter` base class and implement database-specific behavior.
+
+### Sqlite
+
+```typescript
+import { Sqlite } from '@deepagents/text2sql/sqlite';
+
+class Sqlite extends Adapter {
+  constructor(options: SqliteAdapterOptions)
+}
+
+interface SqliteAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+}
+```
+
+**Properties:**
+- `defaultSchema`: `undefined`
+- `systemSchemas`: `[]`
+- `formatterLanguage`: `'sqlite'`
+
+### Postgres
+
+```typescript
+import { Postgres } from '@deepagents/text2sql/postgres';
+
+class Postgres extends Adapter {
+  constructor(options: PostgresAdapterOptions)
+}
+
+interface PostgresAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+  schemas?: string[];  // Limit to specific schemas
+}
+```
+
+**Properties:**
+- `defaultSchema`: `'public'`
+- `systemSchemas`: `['pg_catalog', 'information_schema']`
+- `formatterLanguage`: `'postgresql'`
+
+### SqlServer
+
+```typescript
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
+
+class SqlServer extends Adapter {
+  constructor(options: SqlServerAdapterOptions)
+}
+
+interface SqlServerAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+  schemas?: string[];
+}
+```
+
+**Properties:**
+- `defaultSchema`: `'dbo'`
+- `systemSchemas`: `['INFORMATION_SCHEMA', 'sys']`
+- `formatterLanguage`: `'transactsql'`
+
+### Mysql / Mariadb
+
+```typescript
+import { Mysql, Mariadb } from '@deepagents/text2sql/mysql';
+
+class Mysql extends Adapter {
+  constructor(options: MysqlAdapterOptions)
+}
+
+interface MysqlAdapterOptions {
+  execute: ExecuteFunction;
+  validate?: ValidateFunction;
+  grounding: GroundingFn[];
+  databases?: string[];  // Limit to specific databases
+}
+```
+
+**Properties:**
+- `defaultSchema`: `undefined`
+- `systemSchemas`: `['mysql', 'information_schema', 'performance_schema', 'sys']`
+- `formatterLanguage`: `'mysql'`
+
+### BigQuery
+
+```typescript
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+
+class BigQuery extends Adapter {
+  constructor(options: BigQueryAdapterOptions)
+}
+
+interface BigQueryAdapterOptions {
+  execute: ExecuteFunction;
+  validate: ValidateFunction;  // Required
+  grounding: GroundingFn[];
+  datasets: string[];  // Required
+  projectId?: string;
+}
+```
+
+**Properties:**
+- `defaultSchema`: First dataset if only one provided
+- `systemSchemas`: `[]`
+- `formatterLanguage`: `'bigquery'`
+
+## Grounding Functions
+
+Grounding functions control schema introspection. All adapters support these:
+
+### tables()
+
+Introspect tables, columns, and data types.
+
+```typescript
+function tables(config?: TableGroundingConfig): GroundingFn
+
+interface TableGroundingConfig {
+  include?: string[] | RegExp;  // Filter tables to include
+  exclude?: string[] | RegExp;  // Filter tables to exclude
+}
+```
+
+**Example:**
+```typescript
+import { tables } from '@deepagents/text2sql/postgres';
+
+grounding: [
+  tables(),  // All tables
+  tables({ include: ['customers', 'orders'] }),  // Specific tables
+  tables({ include: /^prod_/ }),  // Tables starting with prod_
+  tables({ exclude: ['temp_', 'staging_'] })  // Exclude patterns
+]
+```
+
+### views()
+
+Introspect database views.
+
+```typescript
+function views(config?: ViewGroundingConfig): GroundingFn
+
+interface ViewGroundingConfig {
+  include?: string[] | RegExp;
+}
+```
+
+**Example:**
+```typescript
+import { views } from '@deepagents/text2sql/postgres';
+
+grounding: [
+  views(),  // All views
+  views({ include: ['customer_summary', 'order_totals'] })
+]
+```
+
+### info()
+
+Provide database version and metadata.
+
+```typescript
+function info(config?: InfoGroundingConfig): GroundingFn
+
+interface InfoGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { info } from '@deepagents/text2sql/sqlite';
+
+grounding: [info()]
+```
+
+### indexes()
+
+Introspect table indexes.
+
+```typescript
+function indexes(config?: IndexesGroundingConfig): GroundingFn
+
+interface IndexesGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { indexes } from '@deepagents/text2sql/postgres';
+
+grounding: [indexes()]
+```
+
+**Output includes:**
+- Index name
+- Columns in index
+- Unique constraint
+- Index type (btree, hash, gin, gist)
+
+### constraints()
+
+Introspect table constraints.
+
+```typescript
+function constraints(config?: ConstraintGroundingConfig): GroundingFn
+
+interface ConstraintGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { constraints } from '@deepagents/text2sql/postgres';
+
+grounding: [constraints()]
+```
+
+**Constraint types:**
+- `PRIMARY_KEY`
+- `FOREIGN_KEY`
+- `UNIQUE`
+- `CHECK`
+- `NOT_NULL`
+- `DEFAULT`
+
+### rowCount()
+
+Count rows and classify table sizes.
+
+```typescript
+function rowCount(config?: RowCountGroundingConfig): GroundingFn
+
+interface RowCountGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { rowCount } from '@deepagents/text2sql/postgres';
+
+grounding: [rowCount()]
+```
+
+**Size classifications:**
+- `tiny`: < 100 rows
+- `small`: 100-999 rows
+- `medium`: 1,000-9,999 rows
+- `large`: 10,000-99,999 rows
+- `huge`: ≥ 100,000 rows
+
+### columnStats()
+
+Collect column statistics.
+
+```typescript
+function columnStats(config?: ColumnStatsGroundingConfig): GroundingFn
+
+interface ColumnStatsGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { columnStats } from '@deepagents/text2sql/postgres';
+
+grounding: [columnStats()]
+```
+
+**Statistics include:**
+- `min`: Minimum value
+- `max`: Maximum value
+- `nullFraction`: Fraction of NULL values (0.0-1.0)
+- `nDistinct`: Estimated distinct values (PostgreSQL)
+- `correlation`: Physical vs logical order correlation (PostgreSQL)
+
+### columnValues()
+
+Fetch distinct values for low-cardinality columns.
+
+```typescript
+function columnValues(config?: ColumnValuesGroundingConfig): GroundingFn
+
+interface ColumnValuesGroundingConfig {
+  limit?: number;  // Max distinct values per column (default: 20)
+}
+```
+
+**Example:**
+```typescript
+import { columnValues } from '@deepagents/text2sql/postgres';
+
+grounding: [
+  columnValues(),  // Default limit: 20
+  columnValues({ limit: 50 })  // Custom limit
+]
+```
+
+**Use case:**
+Identifies enum-like columns and provides valid values:
+```typescript
+// status column has values: ['pending', 'active', 'cancelled']
+// AI knows to use exact values in WHERE clauses
+```
+
+### report()
+
+Generate business context report.
+
+```typescript
+function report(config?: ReportGroundingConfig): GroundingFn
+
+interface ReportGroundingConfig {}
+```
+
+**Example:**
+```typescript
+import { report } from '@deepagents/text2sql/postgres';
+
+grounding: [report()]
+```
+
+## ExecuteFunction
+
+The execute function signature:
+
+```typescript
+type ExecuteFunction = (sql: string) => Promise<any> | any;
+```
+
+**Requirements:**
+- Must return an array of rows OR an object with `rows` property
+- For SQL Server: may return object with `recordset` or `recordsets`
+- For MySQL: may return `[rows, fields]` tuple
+
+**Examples:**
+
+```typescript
+// PostgreSQL (pg)
+execute: async (sql) => {
+  const result = await pool.query(sql);
+  return result.rows;
+}
+
+// SQLite (better-sqlite3)
+execute: (sql) => db.prepare(sql).all()
+
+// SQL Server (mssql)
+execute: async (sql) => {
+  const result = await pool.request().query(sql);
+  return result.recordset;
+}
+
+// MySQL (mysql2)
+execute: async (sql) => {
+  const [rows] = await pool.execute(sql);
+  return rows;
+}
+```
+
+## ValidateFunction
+
+The validate function signature:
+
+```typescript
+type ValidateFunction = (
+  sql: string
+) => Promise<string | void> | string | void;
+```
+
+**Behavior:**
+- Return `void` or empty string if valid
+- Return error message string if invalid
+- Throw error if invalid (will be caught and formatted)
+
+**Default validation:**
+- PostgreSQL, SQLite, MySQL: `EXPLAIN {sql}`
+- SQL Server: `SET PARSEONLY ON; {sql}; SET PARSEONLY OFF;`
+- BigQuery: Required (use dry-run)
+
+**Examples:**
+
+```typescript
+// PostgreSQL
+validate: async (sql) => {
+  try {
+    await pool.query(`EXPLAIN ${sql}`);
+  } catch (error) {
+    return error.message;
+  }
+}
+
+// BigQuery (required)
+validate: async (sql) => {
+  try {
+    await client.query({ query: sql, dryRun: true });
+  } catch (error) {
+    throw error;
+  }
+}
+```
+
+## Error Formatting
+
+Each adapter provides error formatting:
+
+```typescript
+// SQLite
+function formatError(sql: string, error: unknown): {
+  error: string;
+  error_type: string;
+  suggestion: string;
+  sql_attempted: string;
+}
+
+// PostgreSQL
+function formatPostgresError(sql: string, error: unknown)
+
+// SQL Server
+function formatSqlServerError(sql: string, error: unknown)
+
+// MySQL
+function formatMysqlError(sql: string, error: unknown)
+
+// BigQuery
+function formatBigQueryError(sql: string, error: unknown)
+```
+
+## Best Practices
+
+### 1. Choose Appropriate Groundings
+
+```typescript
+// Fast (recommended for development)
+grounding: [tables(), info()]
+
+// Balanced (recommended for production)
+grounding: [tables(), views(), indexes(), constraints()]
+
+// Comprehensive (slower, maximum context)
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints(),
+  rowCount(),
+  columnStats(),
+  columnValues()
+]
+```
+
+### 2. Use Schema Filtering
+
+```typescript
+// PostgreSQL/SQL Server - limit schemas
+const adapter = new Postgres({
+  execute: async (sql) => { /* ... */ },
+  grounding: [tables()],
+  schemas: ['public', 'analytics']  // Only these
+});
+
+// MySQL - limit databases
+const adapter = new Mysql({
+  execute: async (sql) => { /* ... */ },
+  grounding: [tables()],
+  databases: ['production']
+});
+
+// BigQuery - required datasets
+const adapter = new BigQuery({
+  execute: async (sql) => { /* ... */ },
+  validate: async (sql) => { /* ... */ },
+  grounding: [tables()],
+  datasets: ['analytics', 'marketing']  // Required
+});
+```
+
+### 3. Handle Connection Pooling
+
+```typescript
+// Good: Reuse connection pool
+const pool = new pg.Pool({ /* config */ });
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [tables()]
+});
+
+// Cleanup
+process.on('SIGTERM', async () => {
+  await pool.end();
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/text2sql/api/core">
+    Text2SQL core classes
+  </Card>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Adapter feature comparison
+  </Card>
+</CardGroup>

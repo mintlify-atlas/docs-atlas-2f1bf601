@@ -1,0 +1,497 @@
+---
+title: 'Renderers'
+description: 'Transform context fragments into XML, Markdown, TOML, and TOON formats'
+---
+
+## Overview
+
+Renderers transform context fragments into different output formats suitable for various LLM prompt styles. All renderers implement the same base interface and support common options like fragment grouping.
+
+## Available Renderers
+
+<CardGroup cols={2}>
+  <Card title="XmlRenderer" icon="code">
+    Hierarchical XML with proper nesting and escaping
+  </Card>
+  <Card title="MarkdownRenderer" icon="markdown">
+    Human-readable markdown with bullet points
+  </Card>
+  <Card title="TomlRenderer" icon="file-lines">
+    TOML-like configuration format
+  </Card>
+  <Card title="ToonRenderer" icon="table">
+    Token-efficient format with CSV-style tables
+  </Card>
+</CardGroup>
+
+## XmlRenderer
+
+Renders fragments as XML with proper nesting and escaping.
+
+### Basic Usage
+
+```typescript
+import { XmlRenderer, term, hint, guardrail } from '@deepagents/context';
+
+const fragments = [
+  term('MRR', 'monthly recurring revenue'),
+  hint('Always exclude test accounts'),
+  guardrail({ rule: 'Never expose PII', reason: 'Privacy compliance' }),
+];
+
+const renderer = new XmlRenderer({ groupFragments: true });
+console.log(renderer.render(fragments));
+```
+
+### Output
+
+```xml
+<terms>
+  <term>
+    <name>MRR</name>
+    <definition>monthly recurring revenue</definition>
+  </term>
+</terms>
+<hints>
+  <hint>Always exclude test accounts</hint>
+</hints>
+<guardrails>
+  <guardrail>
+    <rule>Never expose PII</rule>
+    <reason>Privacy compliance</reason>
+  </guardrail>
+</guardrails>
+```
+
+### Handling Complex Data
+
+<Tabs>
+  <Tab title="Arrays">
+    ```typescript
+    import { workflow } from '@deepagents/context';
+    
+    const frag = workflow({
+      task: 'Analysis',
+      steps: ['Load data', 'Clean data', 'Analyze'],
+    });
+    
+    const renderer = new XmlRenderer();
+    console.log(renderer.render([frag]));
+    ```
+    
+    **Output:**
+    ```xml
+    <workflow>
+      <task>Analysis</task>
+      <steps>
+        <step>Load data</step>
+        <step>Clean data</step>
+        <step>Analyze</step>
+      </steps>
+    </workflow>
+    ```
+  </Tab>
+  
+  <Tab title="Nested Objects">
+    ```typescript
+    const frag = {
+      name: 'config',
+      data: {
+        database: {
+          host: 'localhost',
+          port: 5432,
+          settings: {
+            timeout: 30,
+            retry: true,
+          },
+        },
+      },
+    };
+    
+    const renderer = new XmlRenderer();
+    console.log(renderer.render([frag]));
+    ```
+    
+    **Output:**
+    ```xml
+    <config>
+      <database>
+        <host>localhost</host>
+        <port>5432</port>
+        <settings>
+          <timeout>30</timeout>
+          <retry>true</retry>
+        </settings>
+      </database>
+    </config>
+    ```
+  </Tab>
+  
+  <Tab title="Multiline Text">
+    ```typescript
+    import { hint } from '@deepagents/context';
+    
+    const frag = hint(`Always follow these rules:
+    1. Validate input
+    2. Check permissions
+    3. Log actions`);
+    
+    const renderer = new XmlRenderer();
+    console.log(renderer.render([frag]));
+    ```
+    
+    **Output:**
+    ```xml
+    <hint>
+      Always follow these rules:
+      1. Validate input
+      2. Check permissions
+      3. Log actions
+    </hint>
+    ```
+  </Tab>
+</Tabs>
+
+### XML Escaping
+
+The renderer automatically escapes special XML characters:
+
+```typescript
+const frag = term('Example', 'Use <tags> & "quotes" in text');
+const renderer = new XmlRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```xml
+<term>
+  <name>Example</name>
+  <definition>Use &lt;tags&gt; &amp; &quot;quotes&quot; in text</definition>
+</term>
+```
+
+## MarkdownRenderer
+
+Renders fragments as human-readable Markdown with bullet points.
+
+### Basic Usage
+
+```typescript
+import { MarkdownRenderer, styleGuide } from '@deepagents/context';
+
+const fragments = [
+  styleGuide({
+    prefer: 'CTEs for readability',
+    never: 'Subqueries when CTEs work',
+    always: 'Use meaningful aliases',
+  }),
+];
+
+const renderer = new MarkdownRenderer();
+console.log(renderer.render(fragments));
+```
+
+### Output
+
+```markdown
+## Style Guide
+
+- **prefer**: CTEs for readability
+- **never**: Subqueries when CTEs work
+- **always**: Use meaningful aliases
+```
+
+### Nested Structures
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+const frag = workflow({
+  task: 'Customer Analysis',
+  steps: [
+    'Segment customers by value',
+    'Calculate metrics per segment',
+    'Identify trends',
+  ],
+});
+
+const renderer = new MarkdownRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```markdown
+## Workflow
+
+- **task**: Customer Analysis
+- **steps**:
+  - Segment customers by value
+  - Calculate metrics per segment
+  - Identify trends
+```
+
+## TomlRenderer
+
+Renders fragments as TOML-like configuration format.
+
+### Basic Usage
+
+```typescript
+import { TomlRenderer, styleGuide } from '@deepagents/context';
+
+const fragments = [
+  styleGuide({
+    prefer: 'CTEs',
+    never: 'subqueries',
+  }),
+];
+
+const renderer = new TomlRenderer();
+console.log(renderer.render(fragments));
+```
+
+### Output
+
+```toml
+[styleGuide]
+prefer = "CTEs"
+never = "subqueries"
+```
+
+### Arrays and Objects
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+const frag = workflow({
+  task: 'Data Pipeline',
+  steps: ['extract', 'transform', 'load'],
+  triggers: ['schedule', 'webhook'],
+});
+
+const renderer = new TomlRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```toml
+[workflow]
+task = "Data Pipeline"
+steps = ["extract", "transform", "load"]
+triggers = ["schedule", "webhook"]
+```
+
+## ToonRenderer
+
+Token-Oriented Object Notation (TOON) is a compact, token-efficient format designed for LLM prompts.
+
+### Key Features
+
+- YAML-like indentation for hierarchy
+- CSV-style tables for uniform object arrays
+- Minimal delimiters to reduce token usage
+- Automatic table detection for efficient array encoding
+
+### Basic Usage
+
+```typescript
+import { ToonRenderer, styleGuide } from '@deepagents/context';
+
+const fragments = [
+  styleGuide({
+    prefer: 'CTEs',
+    never: 'subqueries',
+  }),
+];
+
+const renderer = new ToonRenderer();
+console.log(renderer.render(fragments));
+```
+
+### Output
+
+```yaml
+styleGuide:
+  prefer: CTEs
+  never: subqueries
+```
+
+### Tabular Arrays
+
+TOON automatically detects uniform object arrays and renders them as compact tables:
+
+```typescript
+const frag = {
+  name: 'products',
+  data: [
+    { id: 1, name: 'Widget', price: 19.99 },
+    { id: 2, name: 'Gadget', price: 29.99 },
+    { id: 3, name: 'Doohickey', price: 39.99 },
+  ],
+};
+
+const renderer = new ToonRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```yaml
+products[3]{id,name,price}:
+  1,Widget,19.99
+  2,Gadget,29.99
+  3,Doohickey,39.99
+```
+
+<Note>
+The header `products[3]{id,name,price}:` indicates:
+- `products` - array name
+- `[3]` - array length
+- `{id,name,price}` - field names (CSV header)
+</Note>
+
+### Primitive Arrays
+
+```typescript
+const frag = {
+  name: 'tags',
+  data: ['typescript', 'nodejs', 'ai'],
+};
+
+const renderer = new ToonRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```yaml
+tags[3]: typescript,nodejs,ai
+```
+
+### Mixed Arrays
+
+When arrays contain non-uniform data, TOON uses list syntax:
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+const frag = workflow({
+  task: 'Analysis',
+  steps: ['Load data', 'Process', 'Report'],
+});
+
+const renderer = new ToonRenderer();
+console.log(renderer.render([frag]));
+```
+
+**Output:**
+```yaml
+workflow:
+  task: Analysis
+  steps[3]:
+    - Load data
+    - Process
+    - Report
+```
+
+## Renderer Options
+
+All renderers support the `groupFragments` option:
+
+```typescript
+interface RendererOptions {
+  /**
+   * When true, fragments with the same name are grouped under a pluralized parent tag.
+   * e.g., multiple <hint> become <hints><hint>...</hint><hint>...</hint></hints>
+   */
+  groupFragments?: boolean;
+}
+```
+
+### Example: Fragment Grouping
+
+<CodeGroup>
+
+```typescript Without Grouping
+const renderer = new XmlRenderer({ groupFragments: false });
+
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  term('SDK', 'Software Development Kit'),
+];
+
+console.log(renderer.render(fragments));
+// Output:
+// <term><name>API</name>...</term>
+// <term><name>SDK</name>...</term>
+```
+
+```typescript With Grouping
+const renderer = new XmlRenderer({ groupFragments: true });
+
+const fragments = [
+  term('API', 'Application Programming Interface'),
+  term('SDK', 'Software Development Kit'),
+];
+
+console.log(renderer.render(fragments));
+// Output:
+// <terms>
+//   <term><name>API</name>...</term>
+//   <term><name>SDK</name>...</term>
+// </terms>
+```
+
+</CodeGroup>
+
+## Choosing a Renderer
+
+<Steps>
+  <Step title="Use XmlRenderer">
+    When working with models that prefer structured XML (e.g., Claude with Anthropic's prompt style)
+  </Step>
+  <Step title="Use MarkdownRenderer">
+    For human-readable documentation or when the model handles markdown well
+  </Step>
+  <Step title="Use TomlRenderer">
+    For configuration-style data or when you need a format that's between XML and YAML
+  </Step>
+  <Step title="Use ToonRenderer">
+    When minimizing token usage is critical or when you have large tabular datasets
+  </Step>
+</Steps>
+
+## Custom Rendering
+
+You can create custom renderers by extending the base `ContextRenderer` class:
+
+```typescript
+import { ContextRenderer, type ContextFragment } from '@deepagents/context';
+
+class JsonRenderer extends ContextRenderer {
+  render(fragments: ContextFragment[]): string {
+    const sanitized = this.sanitizeFragments(fragments);
+    return JSON.stringify(sanitized, null, 2);
+  }
+  
+  protected renderFragment() { return ''; }
+  protected renderPrimitive() { return ''; }
+  protected renderArray() { return ''; }
+  protected renderObject() { return ''; }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Domain Knowledge" icon="book" href="/context/domain-knowledge">
+    Add business logic with domain fragments
+  </Card>
+  <Card title="User Context" icon="user" href="/context/user-context">
+    Capture user-specific information
+  </Card>
+  <Card title="Messages" icon="message" href="/context/messages">
+    Work with conversation messages
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/context/api/renderers">
+    Complete renderer API documentation
+  </Card>
+</CardGroup>

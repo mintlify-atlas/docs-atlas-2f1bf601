@@ -1,0 +1,470 @@
+---
+title: 'RSS Feed Connector'
+description: 'Ingest content from RSS and Atom feeds'
+---
+
+# RSS Feed Connector
+
+The RSS connector ingests content from RSS and Atom feeds, with optional full article extraction using Mozilla Readability.
+
+## Import
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Ingest RSS feed
+await ingest({
+  connector: rss('https://hnrss.org/frontpage'),
+  store,
+  embedder,
+});
+```
+
+## Configuration
+
+```typescript
+function rss(feedUrl: string, options?: {
+  maxItems?: number;          // Max items to ingest (default: 50)
+  fetchFullArticles?: boolean; // Extract full article content (default: false)
+}): Connector
+```
+
+### Feed URL
+
+Any valid RSS or Atom feed URL:
+
+```typescript
+const connector = rss('https://hnrss.org/frontpage');
+```
+
+### Max Items
+
+Limit the number of items to ingest:
+
+```typescript
+const connector = rss('https://example.com/feed', {
+  maxItems: 10, // Only ingest latest 10 items
+});
+```
+
+Default is 50 items.
+
+### Full Article Extraction
+
+Fetch and extract full article content:
+
+```typescript
+const connector = rss('https://blog.example.com/feed', {
+  fetchFullArticles: true, // Extract full article text
+});
+```
+
+When enabled:
+- Fetches the article URL from each feed item
+- Uses Mozilla Readability to extract main content
+- Falls back to RSS content if extraction fails
+- Significantly slower but provides complete content
+
+## Feed Parsing
+
+The connector supports:
+
+- **RSS 2.0** - Standard RSS format
+- **RSS 1.0** - RDF-based RSS
+- **Atom** - Atom Syndication Format
+
+### Parsed Fields
+
+```typescript
+{
+  title: string;
+  description: string;
+  link: string;
+  language: string;
+  lastBuildDate: string;
+  items: Array<{
+    title: string;
+    description: string;    // Summary or snippet
+    link: string;
+    pubDate: string;
+    author: string;
+    categories: string[];
+    guid: string;
+    contentEncoded: string; // Full content (if available)
+  }>;
+}
+```
+
+## Document Format
+
+Each feed item is ingested as:
+
+```
+Title: {title}
+Author: {author}
+Published: {pubDate}
+Categories: {categories}
+Link: {link}
+Content:
+{content}
+
+Summary: {title} - {description}
+```
+
+### Feed Information
+
+A special document contains feed metadata:
+
+```
+RSS Feed: {feed.title}
+Description: {feed.description}
+Website: {feed.link}
+Language: {feed.language}
+Last Updated: {lastBuildDate}
+Total Items: {count}
+
+This feed provides: {description}
+```
+
+Document ID: `feed-info`
+
+## Full Article Extraction
+
+When `fetchFullArticles: true`:
+
+### How It Works
+
+1. **Fetch HTML** - Download article page
+2. **Extract Content** - Use Mozilla Readability
+3. **Validate** - Ensure content is substantial (>200 chars)
+4. **Fallback** - Use RSS content if extraction fails
+
+### Example
+
+```typescript
+const connector = rss('https://blog.example.com/feed', {
+  maxItems: 5,
+  fetchFullArticles: true,
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### Readability Features
+
+- Removes navigation, ads, and clutter
+- Extracts main article text
+- Preserves title and structure
+- Works with most news sites and blogs
+
+### Error Handling
+
+Extraction failures are logged but don't stop ingestion:
+
+```typescript
+// If extraction fails, falls back to RSS content
+console.warn(`Failed to fetch article content from ${url}:`, error.message);
+return ''; // Empty string fallback
+```
+
+## Source ID
+
+```typescript
+const connector = rss('https://example.com/feed');
+console.log(connector.sourceId);
+// "rss:https://example.com/feed"
+```
+
+## Instructions
+
+The connector includes AI agent instructions:
+
+```typescript
+connector.instructions = `
+You answer questions about articles and content from the RSS feed: ${feedUrl}.
+Always cite the article title and link when referencing specific content.
+The feed contains recent articles, blog posts, and news items.
+When referencing content, include the publication date and author when available.
+${fetchFullArticles ? 'Full article content has been extracted...' : 'Content includes RSS summaries...'}
+`;
+```
+
+These instructions can be used with AI agents for context.
+
+## Examples
+
+### Hacker News Feed
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = rss('https://hnrss.org/frontpage', {
+  maxItems: 20,
+});
+
+await ingest({ connector, store, embedder });
+
+const results = await similaritySearch(
+  'What are the latest AI developments?',
+  { connector, store, embedder }
+);
+
+console.log(results[0].content);
+```
+
+### Blog with Full Articles
+
+```typescript
+const connector = rss('https://blog.example.com/feed', {
+  maxItems: 10,
+  fetchFullArticles: true, // Extract complete articles
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### Multiple Feeds
+
+```typescript
+const feeds = [
+  rss('https://hnrss.org/frontpage'),
+  rss('https://news.ycombinator.com/rss'),
+  rss('https://blog.example.com/feed'),
+];
+
+for (const connector of feeds) {
+  await ingest({ connector, store, embedder });
+  console.log(`Ingested: ${connector.sourceId}`);
+}
+```
+
+### Search Across Multiple Feeds
+
+```typescript
+const feeds = [
+  rss('https://techcrunch.com/feed/'),
+  rss('https://theverge.com/rss/index.xml'),
+];
+
+// Ingest all feeds
+for (const connector of feeds) {
+  await ingest({ connector, store, embedder });
+}
+
+// Search across all
+const allResults = [];
+for (const connector of feeds) {
+  const results = await similaritySearch('AI news', {
+    connector,
+    store,
+    embedder,
+  });
+  allResults.push(...results);
+}
+
+allResults.sort((a, b) => b.similarity - a.similarity);
+console.log(`Found ${allResults.length} results across all feeds`);
+```
+
+## Metadata
+
+Each document includes metadata:
+
+```typescript
+metadata: {
+  title: 'Article Title',
+  author: 'Author Name',
+  pubDate: '2024-01-01T12:00:00Z',
+  categories: ['tech', 'AI'],
+  link: 'https://example.com/article',
+}
+```
+
+Access metadata in search results:
+
+```typescript
+const results = await similaritySearch('query', config);
+results.forEach(r => {
+  console.log(`Title: ${r.metadata?.title}`);
+  console.log(`Author: ${r.metadata?.author}`);
+  console.log(`Link: ${r.metadata?.link}`);
+});
+```
+
+## Performance Considerations
+
+### Without Full Articles
+
+Fast ingestion using RSS content:
+
+```typescript
+const connector = rss('https://example.com/feed', {
+  maxItems: 50,
+  fetchFullArticles: false, // Fast
+});
+```
+
+### With Full Articles
+
+Slower due to article fetching:
+
+```typescript
+const connector = rss('https://example.com/feed', {
+  maxItems: 10, // Reduce items for faster ingestion
+  fetchFullArticles: true, // Slower
+});
+```
+
+### Timeout
+
+Article fetches have a 10-second timeout:
+
+```typescript
+signal: AbortSignal.timeout(10000) // 10 seconds
+```
+
+## User Agent
+
+Article requests use a custom user agent:
+
+```typescript
+'User-Agent': 'Mozilla/5.0 (compatible; RSS-RAG-Bot/1.0)'
+```
+
+## Error Handling
+
+### Feed Parsing Errors
+
+```typescript
+try {
+  await ingest({
+    connector: rss('https://invalid-feed.com/feed'),
+    store,
+    embedder,
+  });
+} catch (error) {
+  console.error('RSS parsing failed:', error.message);
+}
+```
+
+### Article Extraction Errors
+
+Logged as warnings, don't stop ingestion:
+
+```typescript
+// Article extraction failure
+console.warn(`Failed to fetch article: ${error.message}`);
+// Falls back to RSS content
+```
+
+## Caching Strategy
+
+Use expiry for time-sensitive content:
+
+```typescript
+const connector = rss('https://news.example.com/feed', {
+  maxItems: 20,
+  // Re-ingest after 1 hour
+});
+
+// Manual expiry in ingestion
+await ingest({
+  connector,
+  store,
+  embedder,
+});
+```
+
+Or use connector-level strategies:
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+// Note: RSS connector doesn't support ingestWhen directly
+// Use manual expiry logic or re-ingest periodically
+```
+
+## Content Validation
+
+Full articles must be >200 characters:
+
+```typescript
+if (fullContent.length < 200) {
+  throw new Error('Extracted content too short');
+}
+```
+
+This ensures quality content extraction.
+
+## Best Practices
+
+**Limit Items for Full Extraction**
+
+Full article extraction is slow. Limit items:
+
+```typescript
+rss('https://example.com/feed', {
+  maxItems: 10,
+  fetchFullArticles: true,
+})
+```
+
+**Use RSS Content for Speed**
+
+For many feeds, RSS content is sufficient:
+
+```typescript
+rss('https://example.com/feed', {
+  maxItems: 50,
+  fetchFullArticles: false,
+})
+```
+
+**Re-ingest Periodically**
+
+For news feeds, re-ingest regularly to get latest content:
+
+```typescript
+// Every hour
+setInterval(async () => {
+  await ingest({ connector, store, embedder });
+}, 60 * 60 * 1000);
+```
+
+**Handle Metadata**
+
+Use metadata for filtering and display:
+
+```typescript
+const recent = results.filter(r => {
+  const pubDate = new Date(r.metadata?.pubDate);
+  return pubDate > oneDayAgo;
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub Connector" icon="github" href="/retrieval/connectors/github">
+    Ingest from GitHub
+  </Card>
+  <Card title="Local Files" icon="folder" href="/retrieval/connectors/files">
+    Work with local files
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Search ingested content
+  </Card>
+</CardGroup>

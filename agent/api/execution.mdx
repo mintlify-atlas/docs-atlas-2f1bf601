@@ -1,0 +1,528 @@
+---
+title: Execution Functions
+description: API reference for execute(), generate(), and swarm()
+---
+
+Execution functions run agents and return their responses. Choose the right function based on your needs: streaming vs. non-streaming, single vs. multi-agent.
+
+## execute()
+
+Stream agent responses in real-time. Best for interactive applications.
+
+### Signature
+
+```typescript swarm.ts:119:170
+export async function execute<O, CIn, COut = CIn>(
+  agent: Agent<O, CIn, COut>,
+  messages: UIMessage[] | string,
+  contextVariables: CIn,
+  config?: {
+    abortSignal?: AbortSignal;
+    providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+  },
+): Promise<StreamTextResult<ToolSet, any>>
+```
+
+### Parameters
+
+<ParamField path="agent" type="Agent" required>
+  The agent to execute.
+</ParamField>
+
+<ParamField path="messages" type="UIMessage[] | string" required>
+  User message(s). Can be:
+  - Simple string: `'Hello!'`
+  - Single message: `[user('Hello!')]`
+  - Conversation: `[user('Hi'), assistant('Hello!'), user('Help me')]`
+</ParamField>
+
+<ParamField path="contextVariables" type="CIn" required>
+  Context to pass to the agent. Use `{}` if no context needed.
+</ParamField>
+
+<ParamField path="config.abortSignal" type="AbortSignal">
+  Signal to cancel execution.
+  
+  ```typescript
+  const controller = new AbortController();
+  execute(agent, 'Hi', {}, { abortSignal: controller.signal });
+  ```
+</ParamField>
+
+<ParamField path="config.providerOptions" type="object">
+  Provider-specific options.
+  
+  ```typescript
+  providerOptions: {
+    openai: { reasoningEffort: 'medium' }
+  }
+  ```
+</ParamField>
+
+<ParamField path="config.transform" type="StreamTextTransform | StreamTextTransform[]">
+  Stream transformations to apply.
+  
+  ```typescript
+  import { smoothStream } from 'ai';
+  
+  transform: smoothStream()
+  ```
+</ParamField>
+
+### Return Value
+
+Returns a `Promise<StreamTextResult>` with:
+
+<ResponseField name="textStream" type="AsyncIterable<string>">
+  Stream of text chunks.
+  
+  ```typescript
+  for await (const chunk of stream.textStream) {
+    process.stdout.write(chunk);
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="fullStream" type="AsyncIterable<Event>">
+  Stream of all events (text, tool calls, tool results).
+  
+  ```typescript
+  for await (const event of stream.fullStream) {
+    if (event.type === 'text-delta') {
+      console.log(event.textDelta);
+    }
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="toUIMessageStream()" type="() => ReadableStream">
+  Convert to UI-compatible message stream.
+  
+  ```typescript
+  for await (const chunk of stream.toUIMessageStream()) {
+    // Process UI chunks
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="text" type="Promise<string>">
+  Complete text response (await to get full text).
+  
+  ```typescript
+  const text = await stream.text;
+  ```
+</ResponseField>
+
+<ResponseField name="output" type="Promise<Output>">
+  Structured output (if agent has output schema).
+  
+  ```typescript
+  const output = await stream.output;
+  ```
+</ResponseField>
+
+<ResponseField name="partialOutputStream" type="AsyncIterable<Partial<Output>>">
+  Stream of partial structured output.
+  
+  ```typescript
+  for await (const partial of stream.partialOutputStream) {
+    console.log('Partial:', partial);
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="totalUsage" type="Promise<TokenUsage>">
+  Token usage information.
+  
+  ```typescript
+  const usage = await stream.totalUsage;
+  // { promptTokens: 100, completionTokens: 50, totalTokens: 150 }
+  ```
+</ResponseField>
+
+<ResponseField name="sources" type="Promise<Source[]>">
+  Sources cited (if applicable).
+  
+  ```typescript
+  const sources = await stream.sources;
+  ```
+</ResponseField>
+
+### Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant.',
+});
+
+const stream = await execute(assistant, 'Tell me a joke', {});
+
+// Stream text
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Or get full text
+const text = await stream.text;
+console.log(text);
+
+// Check usage
+const usage = await stream.totalUsage;
+console.log('Tokens:', usage.totalTokens);
+```
+
+## stream()
+
+Alias for `execute()`.
+
+```typescript swarm.ts:172
+export const stream = execute;
+```
+
+## generate()
+
+Non-streaming execution. Returns complete response in one call. Best for batch processing.
+
+### Signature
+
+```typescript swarm.ts:79:117
+export async function generate<O, CIn, COut = CIn>(
+  agent: Agent<O, CIn, COut>,
+  messages: UIMessage[] | string,
+  contextVariables: CIn,
+  config?: {
+    abortSignal?: AbortSignal;
+    providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  },
+): Promise<GenerateTextResult<ToolSet, any>>
+```
+
+### Parameters
+
+Same as `execute()`, except no `transform` option (since it's not streaming).
+
+### Return Value
+
+Returns a `Promise<GenerateTextResult>` with:
+
+<ResponseField name="text" type="string">
+  Complete text response.
+  
+  ```typescript
+  const result = await generate(agent, 'Hello', {});
+  console.log(result.text);
+  ```
+</ResponseField>
+
+<ResponseField name="output" type="Output">
+  Structured output (if agent has output schema).
+  
+  ```typescript
+  const result = await generate(analyzer, 'Great product!', {});
+  console.log(result.output.sentiment); // 'positive'
+  ```
+</ResponseField>
+
+<ResponseField name="usage" type="TokenUsage">
+  Token usage information.
+  
+  ```typescript
+  console.log(result.usage.totalTokens);
+  ```
+</ResponseField>
+
+<ResponseField name="steps" type="StepResult[]">
+  Execution steps including tool calls.
+  
+  ```typescript
+  result.steps.forEach(step => {
+    console.log('Step:', step.toolCalls);
+  });
+  ```
+</ResponseField>
+
+### Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, generate } from '@deepagents/agent';
+import { z } from 'zod';
+
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze sentiment.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number(),
+  }),
+});
+
+const result = await generate(analyzer, 'I love this!', {});
+
+console.log(result.text);
+console.log(result.output); // { sentiment: 'positive', confidence: 0.95 }
+console.log('Tokens:', result.usage.totalTokens);
+```
+
+## swarm()
+
+High-level streaming execution with automatic handoff support. Best for multi-agent systems.
+
+### Signature
+
+```typescript swarm.ts:206:278
+export function swarm<CIn>(
+  agent: Agent<unknown, CIn, any>,
+  messages: UIMessage[] | string,
+  contextVariables: CIn,
+  abortSignal?: AbortSignal,
+)
+```
+
+### Parameters
+
+<ParamField path="agent" type="Agent" required>
+  The root/coordinator agent.
+</ParamField>
+
+<ParamField path="messages" type="UIMessage[] | string" required>
+  User message(s).
+</ParamField>
+
+<ParamField path="contextVariables" type="CIn" required>
+  Context to pass through the agent chain.
+</ParamField>
+
+<ParamField path="abortSignal" type="AbortSignal">
+  Signal to cancel execution.
+</ParamField>
+
+### Return Value
+
+Returns a `ReadableStream` of UI message chunks. Use with a UI message stream consumer.
+
+### Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, instructions, swarm } from '@deepagents/agent';
+
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'Research topics thoroughly.',
+  handoffDescription: 'Handles research tasks',
+});
+
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'Write engaging content.',
+  handoffDescription: 'Handles writing tasks',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions.swarm({
+    purpose: ['Coordinate research and writing'],
+    routine: [
+      'Use transfer_to_researcher for facts',
+      'Use transfer_to_writer for content',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+
+const stream = swarm(coordinator, 'Write a blog post about AI', {});
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.delta);
+  }
+}
+```
+
+## Comparison
+
+<table>
+  <thead>
+    <tr>
+      <th>Feature</th>
+      <th>execute()</th>
+      <th>generate()</th>
+      <th>swarm()</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Streaming</td>
+      <td>✅ Yes</td>
+      <td>❌ No</td>
+      <td>✅ Yes</td>
+    </tr>
+    <tr>
+      <td>Real-time output</td>
+      <td>✅ Yes</td>
+      <td>❌ No</td>
+      <td>✅ Yes</td>
+    </tr>
+    <tr>
+      <td>Multi-agent handoffs</td>
+      <td>⚠️ Partial</td>
+      <td>❌ No</td>
+      <td>✅ Full support</td>
+    </tr>
+    <tr>
+      <td>Structured output</td>
+      <td>✅ Yes</td>
+      <td>✅ Yes</td>
+      <td>✅ Yes</td>
+    </tr>
+    <tr>
+      <td>Token usage</td>
+      <td>✅ Yes</td>
+      <td>✅ Yes</td>
+      <td>✅ Yes</td>
+    </tr>
+    <tr>
+      <td>Best for</td>
+      <td>Interactive apps</td>
+      <td>Batch processing</td>
+      <td>Multi-agent workflows</td>
+    </tr>
+  </tbody>
+</table>
+
+## When to Use Which
+
+### Use `execute()` when:
+
+- Building interactive chat interfaces
+- Need real-time streaming
+- Want to show progress to users
+- Single agent or simple workflows
+
+### Use `generate()` when:
+
+- Processing in batches
+- Don't need streaming
+- Want simpler code (single await)
+- Background processing
+
+### Use `swarm()` when:
+
+- Building multi-agent systems
+- Agents need to hand off to each other
+- Coordinating multiple specialists
+- Need full handoff tracking
+
+## Complete Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute, generate, swarm, instructions } from '@deepagents/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+// Simple agent
+const simple = agent({
+  name: 'simple',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+});
+
+// Streaming
+const stream1 = await execute(simple, 'Tell me a joke', {});
+for await (const chunk of stream1.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Non-streaming
+const result = await generate(simple, 'What is 2+2?', {});
+console.log(result.text);
+
+// Structured output
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze sentiment.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+  }),
+});
+
+const analysis = await generate(analyzer, 'I love this!', {});
+console.log(analysis.output.sentiment); // 'positive'
+
+// Multi-agent
+const specialist1 = agent({
+  name: 'specialist_1',
+  model: openai('gpt-4o'),
+  prompt: 'You specialize in task A.',
+  handoffDescription: 'Handles task A',
+});
+
+const specialist2 = agent({
+  name: 'specialist_2',
+  model: openai('gpt-4o'),
+  prompt: 'You specialize in task B.',
+  handoffDescription: 'Handles task B',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions.swarm({
+    purpose: ['Coordinate specialists'],
+    routine: ['Delegate to appropriate specialist'],
+  }),
+  handoffs: [specialist1, specialist2],
+});
+
+const stream2 = swarm(coordinator, 'Complete complex task', {});
+for await (const chunk of stream2) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.delta);
+  }
+}
+```
+
+## Error Handling
+
+```typescript
+try {
+  const stream = await execute(agent, 'Help me', {});
+  const text = await stream.text;
+  console.log(text);
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('Execution was cancelled');
+  } else if (error.message.includes('rate limit')) {
+    console.log('Rate limit exceeded');
+  } else {
+    console.error('Error:', error.message);
+  }
+}
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="agent()" icon="robot" href="/agent/api/agent">
+    Create agents
+  </Card>
+  <Card title="Utilities" icon="wrench" href="/agent/api/utilities">
+    Helper functions
+  </Card>
+  <Card title="Streaming Guide" icon="water" href="/agent/streaming">
+    Learn about streaming
+  </Card>
+</CardGroup>

@@ -1,0 +1,145 @@
+---
+title: Introduction
+description: A general-purpose LLM evaluation framework with dataset loading, scoring, run persistence, model comparison, and console reporting
+---
+
+# Introduction to DeepAgents Evals
+
+`@deepagents/evals` is a comprehensive evaluation framework for LLM applications. It provides everything you need to measure, track, and improve the quality of AI systems over time.
+
+## Why Evaluate?
+
+LLM evaluation is essential for:
+
+- **Measuring Quality** — Quantify accuracy, factuality, and other metrics
+- **Detecting Regressions** — Catch breaking changes before deployment
+- **Comparing Models** — Objectively compare different model versions or providers
+- **Iterating Confidently** — Make informed decisions backed by data
+- **CI/CD Integration** — Run evals in your pipeline to block bad releases
+
+## Key Features
+
+### Dataset Loading
+
+Load evaluation data from multiple sources:
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+
+// From inline arrays
+const ds = dataset([{ input: 'hello', expected: 'world' }]);
+
+// From files
+const ds = dataset('./data/questions.json');
+const ds = dataset('./data/questions.jsonl');
+const ds = dataset('./data/questions.csv');
+```
+
+Apply chainable transforms:
+
+```typescript
+dataset('./large-dataset.jsonl')
+  .filter((row) => row.difficulty === 'hard')
+  .map((row) => ({ input: row.question, expected: row.answer }))
+  .shuffle()
+  .limit(100);
+```
+
+### Scoring Functions
+
+Use built-in scorers or create custom ones:
+
+```typescript
+import { exactMatch, includes, factuality } from '@deepagents/evals/scorers';
+
+const scorers = {
+  exact: exactMatch,
+  contains: includes,
+  factual: factuality({ model: 'gpt-4o-mini' }),
+};
+```
+
+All scorers return a `ScorerResult`:
+
+```typescript
+interface ScorerResult {
+  score: number; // 0..1
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+### Run Persistence
+
+Store evaluation results in SQLite for historical analysis:
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+const suite = store.createSuite('text2sql-accuracy');
+const runs = store.listRuns(suite.id);
+const failing = store.getFailingCases(runId, 0.5);
+```
+
+### Model Comparison
+
+Compare two runs case-by-case to detect improvements and regressions:
+
+```typescript
+import { compareRuns } from '@deepagents/evals/comparison';
+
+const result = compareRuns(store, baselineRunId, candidateRunId, {
+  tolerance: 0.01,
+  regressionThreshold: 0.05,
+});
+
+console.log(result.regression.regressed); // true if any scorer regressed
+console.log(result.scorerSummaries); // per-scorer mean deltas
+```
+
+### Reporters
+
+Multiple output formats for different use cases:
+
+```typescript
+import { consoleReporter, jsonReporter, csvReporter } from '@deepagents/evals/reporters';
+
+const reporters = [
+  consoleReporter({ verbosity: 'normal' }),
+  jsonReporter({ outputPath: './results.json' }),
+  csvReporter({ outputPath: './results.csv' }),
+];
+```
+
+## Architecture
+
+The framework is organized into subpath exports for granular imports:
+
+| Import | Description |
+| --- | --- |
+| `@deepagents/evals` | Top-level `evaluate()` function |
+| `@deepagents/evals/dataset` | Dataset loading and transforms |
+| `@deepagents/evals/scorers` | Scorer functions and combinators |
+| `@deepagents/evals/store` | SQLite run persistence |
+| `@deepagents/evals/engine` | Eval engine with concurrency and events |
+| `@deepagents/evals/comparison` | Run diffing and regression detection |
+| `@deepagents/evals/reporters` | Console, JSON, CSV, HTML, Markdown reporters |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/evals/installation">
+    Install the package and get started
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/evals/quickstart">
+    Run your first evaluation in 5 minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/evals/api/evaluate">
+    Explore the full API documentation
+  </Card>
+  <Card title="Datasets" icon="database" href="/evals/datasets">
+    Learn about dataset loading and transforms
+  </Card>
+</CardGroup>

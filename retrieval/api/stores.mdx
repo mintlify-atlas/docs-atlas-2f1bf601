@@ -1,0 +1,632 @@
+---
+title: 'Store API Reference'
+description: 'API documentation for Store interface and SqliteStore'
+---
+
+# Store API Reference
+
+Complete API reference for the `Store` interface and `SqliteStore` implementation.
+
+## Store Interface
+
+Vector store interface for saving and searching embeddings.
+
+```typescript
+export interface Store {
+  search: (
+    query: string,
+    options: SearchOptions,
+    embedder: Embedder,
+  ) => Promise<any[]>;
+  
+  sourceExists: (sourceId: string) => Promise<boolean> | boolean;
+  
+  sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
+  
+  setSourceExpiry: (
+    sourceId: string,
+    expiryDate: Date
+  ) => Promise<void> | void;
+  
+  index: (
+    sourceId: string,
+    corpus: Corpus,
+    expiryDate?: Date,
+  ) => Promise<void>;
+}
+```
+
+Location: `/home/daytona/workspace/source/packages/retrieval/src/lib/stores/store.ts:26-41`
+
+## Methods
+
+### search()
+
+Search for similar content using vector similarity.
+
+```typescript
+search(
+  query: string,
+  options: SearchOptions,
+  embedder: Embedder
+): Promise<SearchResult[]>
+```
+
+**Parameters:**
+
+- `query` - Search query text
+- `options` - Search options
+- `embedder` - Embedding function
+
+**Returns:**
+
+Array of search results.
+
+```typescript
+const results = await store.search(
+  'installation guide',
+  {
+    sourceId: 'github:file:facebook/react/README.md',
+    topN: 10,
+  },
+  embedder
+);
+```
+
+### sourceExists()
+
+Check if a source has been ingested.
+
+```typescript
+sourceExists(sourceId: string): Promise<boolean> | boolean
+```
+
+**Parameters:**
+
+- `sourceId` - Source identifier
+
+**Returns:**
+
+`true` if source exists, `false` otherwise.
+
+```typescript
+const exists = await store.sourceExists('github:file:owner/repo/file.md');
+if (!exists) {
+  console.log('Source not yet ingested');
+}
+```
+
+### sourceExpired()
+
+Check if a source has expired.
+
+```typescript
+sourceExpired(sourceId: string): Promise<boolean> | boolean
+```
+
+**Parameters:**
+
+- `sourceId` - Source identifier
+
+**Returns:**
+
+`true` if source is expired, `false` otherwise.
+
+```typescript
+const expired = await store.sourceExpired('rss:https://example.com/feed');
+if (expired) {
+  console.log('Source needs re-ingestion');
+}
+```
+
+### setSourceExpiry()
+
+Set expiration date for a source.
+
+```typescript
+setSourceExpiry(sourceId: string, expiryDate: Date): Promise<void> | void
+```
+
+**Parameters:**
+
+- `sourceId` - Source identifier
+- `expiryDate` - Expiration date
+
+```typescript
+const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000);
+await store.setSourceExpiry('rss:feed-url', oneHourFromNow);
+```
+
+### index()
+
+Index a document corpus (called by `ingest()`).
+
+```typescript
+index(
+  sourceId: string,
+  corpus: Corpus,
+  expiryDate?: Date
+): Promise<void>
+```
+
+**Parameters:**
+
+- `sourceId` - Source identifier
+- `corpus` - Document corpus to index
+- `expiryDate` - Optional expiry date
+
+```typescript
+await store.index(
+  'github:file:path',
+  {
+    id: 'doc-1',
+    cid: 'bafkrei...',
+    metadata: { author: 'John' },
+    chunker: async function* () {
+      yield { content: 'chunk 1', embedding: [0.1, 0.2, ...] };
+      yield { content: 'chunk 2', embedding: [0.3, 0.4, ...] };
+    },
+  }
+);
+```
+
+## Type Definitions
+
+### SearchOptions
+
+```typescript
+export interface SearchOptions {
+  sourceId: string;
+  documentId?: string;
+  topN?: number;
+}
+```
+
+**sourceId** - `string`
+
+Source to search within.
+
+**documentId** - `string` (optional)
+
+Restrict search to specific document.
+
+**topN** - `number` (optional)
+
+Number of results to return.
+
+### Corpus
+
+```typescript
+export type Corpus = {
+  id: string;
+  cid: string;
+  chunker: () => AsyncGenerator<Chunk>;
+  metadata?: Record<string, any>;
+};
+```
+
+**id** - Document identifier
+
+**cid** - Content identifier (hash)
+
+**chunker** - Async generator yielding chunks with embeddings
+
+**metadata** - Optional document metadata
+
+### Chunk
+
+```typescript
+export type Chunk = {
+  content: string;
+  embedding: Embedding | Float32Array;
+};
+```
+
+**content** - Chunk text
+
+**embedding** - Vector embedding
+
+### Embedder
+
+```typescript
+export type Embedder = (documents: string[]) => Promise<{
+  embeddings: (Embedding | Float32Array)[];
+  dimensions: number;
+}>;
+```
+
+Function that converts text to embeddings.
+
+## SqliteStore
+
+SQLite-based vector store implementation.
+
+### Constructor
+
+```typescript
+class SqliteStore implements Store {
+  constructor(db: DB, dimension: number)
+}
+```
+
+**Parameters:**
+
+- `db` - Database instance (better-sqlite3)
+- `dimension` - Embedding dimensions (must match model)
+
+**Example:**
+
+```typescript
+import Database from 'better-sqlite3';
+import { SqliteStore } from '@deepagents/retrieval';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384); // BGE-Small-EN-V15
+```
+
+### Database Schema
+
+The store creates these tables:
+
+**sources**
+
+```sql
+CREATE TABLE sources (
+  source_id TEXT PRIMARY KEY,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  expires_at TEXT
+);
+```
+
+**documents**
+
+```sql
+CREATE TABLE documents (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL,
+  cid TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (source_id) REFERENCES sources(source_id)
+);
+```
+
+**vec_chunks** (virtual table)
+
+```sql
+CREATE VIRTUAL TABLE vec_chunks USING vec0(
+  source_id TEXT,
+  document_id TEXT,
+  content TEXT,
+  embedding float[{dimension}]
+);
+```
+
+### Internal Methods
+
+These methods are used internally:
+
+#### upsertDoc()
+
+```typescript
+upsertDoc(inputs: {
+  documentId: string;
+  sourceId: string;
+  cid: string;
+  metadata?: Record<string, any>;
+}): any
+```
+
+Insert or update a document.
+
+**Returns:** Statement result with `changes` property.
+
+#### insertDoc()
+
+```typescript
+insertDoc(inputs: {
+  sourceId: string;
+  documentId: string;
+}): (chunk: Chunk) => void
+```
+
+Create a chunk insertion function.
+
+**Returns:** Function to insert chunks.
+
+#### delete()
+
+```typescript
+delete(inputs: {
+  sourceId: string;
+  documentId: string;
+}): any
+```
+
+Delete all chunks for a document.
+
+### Vector Operations
+
+#### vectorToBlob()
+
+Convert vector to SQLite blob.
+
+```typescript
+export function vectorToBlob(
+  vector: number[] | Float32Array
+): Buffer
+```
+
+**Parameters:**
+
+- `vector` - Embedding vector
+
+**Returns:**
+
+Buffer containing Float32 data.
+
+**Example:**
+
+```typescript
+import { vectorToBlob } from '@deepagents/retrieval';
+
+const embedding = [0.1, 0.2, 0.3, ...];
+const blob = vectorToBlob(embedding);
+```
+
+### Normalization
+
+Embeddings are normalized before storage:
+
+```sql
+vec_normalize(vec_f32(?))
+```
+
+This ensures consistent cosine similarity calculations.
+
+### Search Implementation
+
+Search uses sqlite-vec's MATCH operator:
+
+```sql
+SELECT v.content, v.distance, v.document_id, d.metadata
+FROM vec_chunks v
+JOIN documents d ON d.id = v.document_id
+WHERE v.source_id = ?
+  AND v.embedding MATCH vec_normalize(vec_f32(?))
+  AND v.k = ?
+ORDER BY v.distance ASC
+```
+
+**Distance Metric:** Cosine distance (0-1, lower is better)
+
+### Transactions
+
+Batch operations use transactions:
+
+```typescript
+this.#db.exec('BEGIN IMMEDIATE');
+try {
+  // Batch operations
+  this.#db.exec('COMMIT');
+} catch (error) {
+  this.#db.exec('ROLLBACK');
+  throw error;
+}
+```
+
+Default batch size: 32 chunks per transaction.
+
+## Complete Example
+
+```typescript
+import Database from 'better-sqlite3';
+import { SqliteStore } from '@deepagents/retrieval';
+import { fastembed } from '@deepagents/retrieval';
+
+// Create database and store
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Check if source exists
+const sourceId = 'github:file:facebook/react/README.md';
+const exists = await store.sourceExists(sourceId);
+console.log('Source exists:', exists);
+
+// Search (if exists)
+if (exists) {
+  const results = await store.search(
+    'installation',
+    { sourceId, topN: 5 },
+    embedder
+  );
+  
+  console.log(`Found ${results.length} results`);
+  results.forEach(r => {
+    console.log(`Distance: ${r.distance}`);
+    console.log(`Content: ${r.content.slice(0, 100)}...`);
+  });
+}
+
+// Set expiry
+const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+await store.setSourceExpiry(sourceId, expires);
+
+// Check if expired
+const expired = await store.sourceExpired(sourceId);
+console.log('Source expired:', expired);
+```
+
+## Performance Considerations
+
+### Embedding Dimensions
+
+Dimensions must match between store and embedder:
+
+```typescript
+// BGE-Small-EN-V15: 384 dimensions
+const store = new SqliteStore(db, 384);
+const embedder = fastembed({ model: 'BGESmallENV15' });
+
+// BGE-Base-EN-V15: 768 dimensions
+const store2 = new SqliteStore(db2, 768);
+const embedder2 = fastembed({ model: 'BGEBaseENV15' });
+```
+
+### Batch Size
+
+Default batch size (32) balances performance and memory:
+
+```typescript
+const batchSize = 32; // Internal default
+```
+
+Larger batches are faster but use more memory.
+
+### Index Performance
+
+SQLite-vec uses HNSW indexing for fast similarity search. Performance scales well to millions of vectors.
+
+### Memory Usage
+
+In-memory databases are fast but limited by RAM:
+
+```typescript
+// In-memory (fast, limited)
+const db = new Database(':memory:');
+
+// On-disk (slower, unlimited)
+const db = new Database('./vectors.db');
+```
+
+## Error Handling
+
+### Database Errors
+
+```typescript
+try {
+  const store = new SqliteStore(db, 384);
+} catch (error) {
+  console.error('Failed to create store:', error);
+}
+```
+
+### Dimension Mismatch
+
+```typescript
+const store = new SqliteStore(db, 384);
+const embedder = fastembed({ model: 'BGEBaseENV15' }); // 768 dims
+
+// This will fail!
+try {
+  await store.index(sourceId, corpus);
+} catch (error) {
+  console.error('Dimension mismatch:', error);
+}
+```
+
+### Transaction Failures
+
+Transactions automatically rollback on error:
+
+```typescript
+try {
+  await store.index(sourceId, corpus);
+} catch (error) {
+  // Transaction already rolled back
+  console.error('Indexing failed:', error);
+}
+```
+
+## Best Practices
+
+**Match Dimensions**
+
+Always ensure store dimensions match embedder:
+
+```typescript
+const dimensions = 384; // BGE-Small-EN-V15
+const store = new SqliteStore(db, dimensions);
+const embedder = fastembed({ model: 'BGESmallENV15' });
+```
+
+**Persistent Storage**
+
+Use file-based databases for production:
+
+```typescript
+// Production
+const db = new Database('./vectors.db');
+
+// Development/Testing only
+const db = new Database(':memory:');
+```
+
+**Close Database**
+
+Close the database when done:
+
+```typescript
+db.close();
+```
+
+**Check Existence**
+
+Check if source exists before operations:
+
+```typescript
+if (await store.sourceExists(sourceId)) {
+  // Perform operations
+}
+```
+
+**Handle Expiry**
+
+Set appropriate expiry for time-sensitive content:
+
+```typescript
+const oneDay = 24 * 60 * 60 * 1000;
+const expires = new Date(Date.now() + oneDay);
+await store.setSourceExpiry(sourceId, expires);
+```
+
+## SQLite Configuration
+
+Optimize SQLite for better performance:
+
+```typescript
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+
+// Enable WAL mode for better concurrency
+db.pragma('journal_mode = WAL');
+
+// Increase cache size (in pages)
+db.pragma('cache_size = 10000');
+
+// Enable memory-mapped I/O
+db.pragma('mmap_size = 30000000000');
+
+const store = new SqliteStore(db, 384);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/retrieval/api/core">
+    ingest() and similaritySearch() reference
+  </Card>
+  <Card title="Connector API" icon="plug" href="/retrieval/api/connectors">
+    Connector interface reference
+  </Card>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn about ingestion
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Learn about search
+  </Card>
+</CardGroup>

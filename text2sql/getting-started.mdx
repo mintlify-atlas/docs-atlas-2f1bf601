@@ -1,0 +1,363 @@
+---
+title: Getting Started
+description: Write your first natural language SQL query
+---
+
+# Getting Started
+
+Learn how to create your first Text2SQL instance and generate SQL from natural language.
+
+## Quick Example
+
+Here's a complete example using PostgreSQL:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import pg from 'pg';
+import { Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore } from '@deepagents/context';
+import {
+  Postgres,
+  tables,
+  views,
+  info,
+  indexes,
+  constraints
+} from '@deepagents/text2sql/postgres';
+
+// Create database connection
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+// Create Text2SQL instance
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: groq('llama-3.3-70b-versatile'),
+  adapter: new Postgres({
+    execute: async (sql) => {
+      const result = await pool.query(sql);
+      return result.rows;
+    },
+    grounding: [
+      tables(),      // Tables and columns
+      views(),       // Database views
+      info(),        // Database version info
+      indexes(),     // Index metadata
+      constraints()  // Foreign keys, UNIQUE, CHECK
+    ]
+  }),
+  store: new InMemoryContextStore()
+});
+
+// Generate SQL from natural language
+const sql = await text2sql.toSql('Show me the top 10 customers by revenue');
+console.log(sql);
+// SELECT * FROM customers ORDER BY total_revenue DESC LIMIT 10
+```
+
+## Step-by-Step Setup
+
+### 1. Import Dependencies
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+
+// Import your database adapter
+import { Sqlite, tables, views } from '@deepagents/text2sql/sqlite';
+```
+
+### 2. Create Database Adapter
+
+The adapter handles database introspection and query execution.
+
+#### SQLite Example
+
+```typescript
+import Database from 'better-sqlite3';
+import { Sqlite, tables, views, info } from '@deepagents/text2sql/sqlite';
+
+const db = new Database('./my-database.db');
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [
+    tables(),
+    views(),
+    info()
+  ]
+});
+```
+
+#### PostgreSQL Example
+
+```typescript
+import pg from 'pg';
+import { Postgres, tables, constraints } from '@deepagents/text2sql/postgres';
+
+const pool = new pg.Pool({
+  host: 'localhost',
+  database: 'mydb',
+  user: 'postgres',
+  password: 'password'
+});
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    constraints()
+  ],
+  schemas: ['public'] // Optional: limit to specific schemas
+});
+```
+
+### 3. Configure Context Store
+
+The context store manages conversation history and schema cache.
+
+```typescript
+import { InMemoryContextStore, SqliteContextStore } from '@deepagents/context';
+
+// In-memory (for development/testing)
+const store = new InMemoryContextStore();
+
+// SQLite (for production with persistence)
+const store = new SqliteContextStore({
+  path: './context.db'
+});
+```
+
+### 4. Create Text2SQL Instance
+
+```typescript
+const text2sql = new Text2Sql({
+  version: 'v1',              // Schema version (for cache invalidation)
+  model: openai('gpt-4o'),     // AI model
+  adapter: adapter,            // Database adapter
+  store: store                 // Context store
+});
+```
+
+### 5. Generate SQL
+
+Use the `toSql()` method to convert natural language to SQL:
+
+```typescript
+const sql = await text2sql.toSql('How many orders were placed last month?');
+console.log(sql);
+```
+
+### 6. Execute and Get Results
+
+You can execute the generated SQL directly:
+
+```typescript
+const sql = await text2sql.toSql('Show me all customers from California');
+const results = await adapter.execute(sql);
+console.log(results);
+```
+
+## Configuration Options
+
+### Text2SQL Constructor
+
+```typescript
+new Text2Sql({
+  // Required
+  version: string,        // Schema version for cache invalidation
+  model: AgentModel,      // AI model from Vercel AI SDK
+  adapter: Adapter,       // Database adapter
+  store: ContextStore,    // Context storage
+
+  // Optional
+  teachingsOptions?: {
+    date?: 'strict' | false  // Date clarification behavior
+  },
+  tools?: Record<string, Tool>,  // Additional tools for the agent
+  transform?: StreamTextTransform  // Stream transformation
+});
+```
+
+### Adapter Options
+
+All adapters support:
+
+```typescript
+{
+  execute: ExecuteFunction,      // Function to execute SQL
+  validate?: ValidateFunction,   // Optional custom validator
+  grounding: GroundingFn[]      // Schema introspection functions
+}
+```
+
+PostgreSQL and SQL Server also support:
+
+```typescript
+{
+  schemas?: string[]  // Limit introspection to specific schemas
+}
+```
+
+## Grounding Functions
+
+Grounding functions control what schema metadata the AI receives:
+
+```typescript
+import {
+  tables,        // Tables, columns, primary keys
+  views,         // Database views
+  info,          // Database version and metadata
+  indexes,       // Index information
+  constraints,   // Foreign keys, UNIQUE, CHECK
+  rowCount,      // Table row counts and size hints
+  columnStats,   // Min/max/null distribution
+  columnValues   // Distinct values for low-cardinality columns
+} from '@deepagents/text2sql/[adapter]';
+
+const adapter = new Postgres({
+  execute: async (sql) => { /* ... */ },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints(),
+    rowCount(),
+    columnStats(),
+    columnValues({ limit: 20 })  // Max distinct values to fetch
+  ]
+});
+```
+
+## Schema Introspection
+
+The first time you call `toSql()` or `chat()`, Text2SQL introspects your database schema. This is cached automatically:
+
+```typescript
+// First call: introspects schema (slow)
+const sql1 = await text2sql.toSql('Show me all customers');
+
+// Subsequent calls: uses cached schema (fast)
+const sql2 = await text2sql.toSql('Count orders by status');
+```
+
+Manually trigger introspection:
+
+```typescript
+const schemaFragments = await text2sql.index();
+console.log(schemaFragments);
+```
+
+## Error Handling
+
+```typescript
+try {
+  const sql = await text2sql.toSql('Show me invalid table');
+} catch (error) {
+  console.error('Failed to generate SQL:', error);
+}
+```
+
+The system provides helpful error messages:
+
+```
+MISSING_TABLE: Check the database schema for the correct table name.
+The table you referenced does not exist.
+```
+
+## Complete Example
+
+Here's a complete working example with SQLite:
+
+```typescript app.ts
+import { Text2Sql } from '@deepagents/text2sql';
+import { Sqlite, tables, views, info } from '@deepagents/text2sql/sqlite';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import Database from 'better-sqlite3';
+
+// Create in-memory SQLite database with sample data
+const db = new Database(':memory:');
+db.exec(`
+  CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE,
+    total_revenue REAL DEFAULT 0
+  );
+  
+  CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    customer_id INTEGER,
+    amount REAL,
+    status TEXT,
+    created_at TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+  );
+  
+  INSERT INTO customers (name, email, total_revenue) VALUES
+    ('Alice', 'alice@example.com', 5000),
+    ('Bob', 'bob@example.com', 3000),
+    ('Charlie', 'charlie@example.com', 8000);
+`);
+
+// Create Text2SQL instance
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+    grounding: [tables(), views(), info()]
+  }),
+  store: new InMemoryContextStore()
+});
+
+// Generate and execute queries
+async function main() {
+  // Simple query
+  const sql1 = await text2sql.toSql('Show me all customers');
+  console.log('Query 1:', sql1);
+  console.log('Results:', db.prepare(sql1).all());
+  
+  // Aggregation
+  const sql2 = await text2sql.toSql('What is the total revenue?');
+  console.log('Query 2:', sql2);
+  console.log('Results:', db.prepare(sql2).all());
+  
+  // Top N with ordering
+  const sql3 = await text2sql.toSql('Show top 5 customers by revenue');
+  console.log('Query 3:', sql3);
+  console.log('Results:', db.prepare(sql3).all());
+}
+
+main().catch(console.error);
+```
+
+Run it:
+
+```bash
+node app.ts
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Learn about database-specific features
+  </Card>
+  <Card title="Teachables" icon="graduation-cap" href="/text2sql/teachables">
+    Inject domain knowledge to improve accuracy
+  </Card>
+  <Card title="Conversational" icon="comments" href="/text2sql/conversational">
+    Build multi-turn conversations
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/core">
+    Explore the full API
+  </Card>
+</CardGroup>

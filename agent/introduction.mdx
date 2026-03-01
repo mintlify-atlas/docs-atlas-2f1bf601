@@ -1,0 +1,124 @@
+---
+title: Agent Framework
+description: Build multi-agent AI systems with TypeScript
+---
+
+@deepagents/agent is a framework for building multi-agent AI systems with TypeScript. Create agents that use tools, coordinate through handoffs, and work together to solve complex tasks.
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Agent Composition" icon="cubes">
+    Build modular agents with specific roles and capabilities
+  </Card>
+  <Card title="Tool Integration" icon="wrench">
+    Compatible with Vercel AI SDK tools
+  </Card>
+  <Card title="Handoffs" icon="arrows-turn-right">
+    Agents can delegate to specialized agents automatically
+  </Card>
+  <Card title="Structured Output" icon="code">
+    Type-safe responses with Zod schemas
+  </Card>
+  <Card title="Streaming" icon="water">
+    Real-time streaming responses
+  </Card>
+  <Card title="Context Sharing" icon="share-nodes">
+    Type-safe state passed between agents
+  </Card>
+</CardGroup>
+
+## Quick Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute, user } from '@deepagents/agent';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant.',
+});
+
+const stream = execute(assistant, 'Hello!', {});
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Use Cases
+
+### Research & Writing
+
+Build agents that research topics, gather information, and produce detailed reports:
+
+- **Planner Agent** - Generates search queries
+- **Research Agent** - Executes searches and summarizes findings
+- **Writer Agent** - Synthesizes research into cohesive reports
+
+### Customer Support
+
+Create specialized agents for different support scenarios:
+
+- **Triage Agent** - Routes requests to appropriate specialists
+- **Billing Agent** - Handles payment and subscription issues
+- **Technical Agent** - Provides technical troubleshooting
+
+### Data Analysis
+
+Coordinate agents for complex data workflows:
+
+- **SQL Agent** - Queries databases
+- **Analysis Agent** - Processes and interprets results
+- **Visualization Agent** - Creates charts and dashboards
+
+## Core Concepts
+
+<Steps>
+  <Step title="Agents">
+    Agents are autonomous units with a language model, instructions, and optional tools. Each agent has a specific role and capabilities.
+  </Step>
+  <Step title="Tools">
+    Tools extend agent capabilities by allowing them to interact with external systems, APIs, or perform computations.
+  </Step>
+  <Step title="Handoffs">
+    Handoffs enable agents to transfer control to specialized agents when needed, creating a coordination hierarchy.
+  </Step>
+  <Step title="Context Variables">
+    Shared state that flows through agent interactions, enabling stateful multi-agent workflows.
+  </Step>
+</Steps>
+
+## AI Model Providers
+
+Works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs):
+
+```typescript
+import { anthropic } from '@ai-sdk/anthropic';
+import { google } from '@ai-sdk/google';
+import { groq } from '@ai-sdk/groq';
+import { openai } from '@ai-sdk/openai';
+
+const agent1 = agent({ model: openai('gpt-4o') /* ... */ });
+const agent2 = agent({ model: anthropic('claude-sonnet-4-20250514') /* ... */ });
+const agent3 = agent({ model: google('gemini-1.5-pro') /* ... */ });
+const agent4 = agent({ model: groq('llama-3.3-70b-versatile') /* ... */ });
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/agent/installation">
+    Install @deepagents/agent in your project
+  </Card>
+  <Card title="Basic Agent" icon="rocket" href="/agent/basic-agent">
+    Create your first agent
+  </Card>
+  <Card title="Tools" icon="wrench" href="/agent/tools">
+    Integrate tools with agents
+  </Card>
+  <Card title="Multi-Agent" icon="users" href="/agent/multi-agent">
+    Build multi-agent systems
+  </Card>
+</CardGroup>

@@ -1,0 +1,475 @@
+---
+title: '@deepagents/text2sql'
+description: 'AI-powered natural language to SQL queries'
+---
+
+## Overview
+
+The `@deepagents/text2sql` package converts natural language questions into validated, executable SQL queries. It supports multiple databases, domain knowledge injection, conversational context, and is safe by default.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+```
+
+**Database Adapters:**
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install pg @types/pg
+    ```
+  </Tab>
+  <Tab title="SQLite">
+    No additional dependencies required.
+  </Tab>
+  <Tab title="SQL Server">
+    ```bash
+    npm install mssql @types/mssql
+    ```
+  </Tab>
+</Tabs>
+
+## Quick Example
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import pg from 'pg';
+
+import { InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
+import { Postgres, tables, constraints } from '@deepagents/text2sql/postgres';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: groq('llama-3.3-70b-versatile'),
+  adapter: new Postgres({
+    execute: async (sql) => {
+      const result = await pool.query(sql);
+      return result.rows;
+    },
+    grounding: [
+      tables(),
+      constraints(),
+      indexes(),
+      lowCardinality(),
+    ],
+  }),
+  store: new InMemoryContextStore(),
+});
+
+// Generate SQL
+const sql = await text2sql.toSql('Show me the top 10 customers by revenue');
+console.log(sql);
+// SELECT customer_name, SUM(revenue) as total_revenue
+// FROM customers
+// GROUP BY customer_name
+// ORDER BY total_revenue DESC
+// LIMIT 10
+```
+
+## Core API
+
+### `new Text2Sql(config)`
+
+Creates a text-to-SQL instance.
+
+```typescript
+interface Text2SqlConfig {
+  version: string;                    // Version identifier
+  model: LanguageModel;               // AI SDK model
+  adapter: DatabaseAdapter;           // Database adapter
+  store: ContextStore;                // Context persistence
+  instructions?: ContextFragment[];   // Domain knowledge
+}
+```
+
+### `toSql(question)`
+
+Convert a question to SQL:
+
+```typescript
+const sql = await text2sql.toSql(
+  'What are the top 5 products by sales?'
+);
+
+console.log(sql);
+// SELECT product_name, SUM(sales) as total_sales
+// FROM products
+// GROUP BY product_name
+// ORDER BY total_sales DESC
+// LIMIT 5
+```
+
+### `chat(messages, options)`
+
+Conversational multi-turn interactions:
+
+```typescript
+const chatId = 'chat-123';
+const userId = 'user-456';
+
+// First turn
+const stream1 = await text2sql.chat(
+  [{ role: 'user', content: 'Show me orders from last month' }],
+  { chatId, userId }
+);
+
+for await (const chunk of stream1) {
+  console.log(chunk);
+}
+
+// Follow-up (context preserved)
+const stream2 = await text2sql.chat(
+  [{ role: 'user', content: 'Now filter to only completed ones' }],
+  { chatId, userId }
+);
+```
+
+### `explain(sql)`
+
+Convert SQL back to natural language:
+
+```typescript
+const explanation = await text2sql.explain(
+  'SELECT * FROM users WHERE created_at > NOW() - INTERVAL \'7 days\''
+);
+
+console.log(explanation);
+// "Show all users created in the last 7 days"
+```
+
+## Database Adapters
+
+### PostgreSQL
+
+```typescript
+import { Postgres } from '@deepagents/text2sql/postgres';
+import pg from 'pg';
+
+const pool = new pg.Pool({ connectionString: '...' });
+
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),      // Tables and columns
+    views(),       // Database views
+    info(),        // DB version and info
+    indexes(),     // Index information
+    constraints(), // Foreign keys
+    rowCount(),    // Table sizes
+    columnStats(), // Min/max/null stats
+    lowCardinality(), // Enum-like columns
+  ],
+});
+```
+
+### SQLite
+
+```typescript
+import { Sqlite } from '@deepagents/text2sql/sqlite';
+import Database from 'better-sqlite3';
+
+const db = new Database('./data.db');
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [
+    tables(),
+    indexes(),
+    constraints(),
+  ],
+});
+```
+
+### SQL Server
+
+```typescript
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import sql from 'mssql';
+
+const pool = new sql.ConnectionPool({
+  server: 'localhost',
+  database: 'mydb',
+  user: 'sa',
+  password: 'password',
+});
+
+await pool.connect();
+
+const adapter = new SqlServer({
+  execute: async (query) => {
+    const result = await pool.request().query(query);
+    return result.recordset;
+  },
+  grounding: [tables(), constraints()],
+});
+```
+
+## Grounding Functions
+
+Control what schema metadata the AI receives:
+
+| Function | Description |
+|----------|-------------|
+| `tables()` | Tables, columns, primary keys |
+| `views()` | Database views |
+| `info()` | DB version and information |
+| `indexes()` | Index hints for performance |
+| `constraints()` | Foreign keys and constraints |
+| `rowCount()` | Table sizes (tiny/small/medium/large/huge) |
+| `columnStats()` | Min/max/null distribution |
+| `lowCardinality()` | Enum-like columns with distinct values |
+
+**Example:**
+
+```typescript
+const adapter = new Postgres({
+  execute: executeQuery,
+  grounding: [
+    tables(),           // Always include
+    constraints(),      // Helpful for joins
+    lowCardinality(),  // For filtering
+    // Skip rowCount() if not needed
+  ],
+});
+```
+
+## Domain Knowledge
+
+Inject business context using fragments:
+
+```typescript
+import { term, hint, guardrail, example } from '@deepagents/context';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: groq('llama-3.3-70b-versatile'),
+  adapter,
+  store,
+  instructions: [
+    // Business terms
+    term('MRR', 'monthly recurring revenue'),
+    term('ARR', 'annual recurring revenue'),
+    term('churn', 'customers who cancelled subscription'),
+    
+    // Behavioral hints
+    hint('Always exclude test accounts with email ending in @test.com'),
+    hint('Use fiscal year starting in July'),
+    
+    // Safety guardrails
+    guardrail({
+      rule: 'Never expose individual salaries',
+      reason: 'Confidential HR data',
+      action: 'Aggregate by department instead',
+    }),
+    
+    // Examples
+    example({
+      question: 'show me churned customers',
+      answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+      note: 'Always order by churned_at for recent first',
+    }),
+  ],
+});
+```
+
+**Available Fragment Types:**
+- `term` - Business vocabulary
+- `hint` - Behavioral rules
+- `guardrail` - Safety boundaries
+- `example` - Q&A pairs
+- `explain` - Concept explanations
+- `clarification` - When to ask for more info
+- `workflow` - Multi-step processes
+- `quirk` - Data edge cases
+- `styleGuide` - Query style preferences
+- `analogy` - Concept comparisons
+- `glossary` - Term-to-expression mapping
+
+## Conversations
+
+Build multi-turn conversational interfaces:
+
+```typescript
+const chatId = 'chat-123';
+const userId = 'user-456';
+
+// First question
+const stream1 = await text2sql.chat(
+  [{ role: 'user', content: 'Show me sales by month' }],
+  { chatId, userId }
+);
+
+for await (const chunk of stream1) {
+  // Handle streaming response
+}
+
+// Follow-up (context maintained)
+const stream2 = await text2sql.chat(
+  [{ role: 'user', content: 'Now just for Q4' }],
+  { chatId, userId }
+);
+
+// Another follow-up
+const stream3 = await text2sql.chat(
+  [{ role: 'user', content: 'Break it down by product' }],
+  { chatId, userId }
+);
+```
+
+The system maintains:
+- Conversation history
+- Generated queries
+- User preferences
+- Clarifications
+
+## Safety Features
+
+### Read-Only Queries
+
+By default, only SELECT queries are allowed:
+
+```typescript
+await text2sql.toSql('DELETE FROM users'); // Throws error
+await text2sql.toSql('DROP TABLE orders'); // Throws error
+```
+
+### Validation
+
+Queries are validated before execution:
+
+```typescript
+const text2sql = new Text2Sql({
+  // ...
+  adapter: new Postgres({
+    execute: async (sql) => {
+      // Validation happens before this
+      return await pool.query(sql).then(r => r.rows);
+    },
+    grounding: [...],
+  }),
+});
+```
+
+### Custom Guardrails
+
+```typescript
+import { guardrail } from '@deepagents/context';
+
+const text2sql = new Text2Sql({
+  // ...
+  instructions: [
+    guardrail({
+      rule: 'Never query the audit_logs table',
+      reason: 'Sensitive security data',
+      action: 'Inform user this data is restricted',
+    }),
+    guardrail({
+      rule: 'Limit results to 1000 rows maximum',
+      reason: 'Performance',
+      action: 'Add LIMIT 1000 to all queries',
+    }),
+  ],
+});
+```
+
+## Model Selection
+
+Works with any AI SDK provider:
+
+<Tabs>
+  <Tab title="Groq (Recommended)">
+    ```typescript
+    import { groq } from '@ai-sdk/groq';
+
+    const text2sql = new Text2Sql({
+      version: 'v1',
+      model: groq('llama-3.3-70b-versatile'),
+      // ...
+    });
+    ```
+    Fast and cost-effective for SQL generation.
+  </Tab>
+  <Tab title="OpenAI">
+    ```typescript
+    import { openai } from '@ai-sdk/openai';
+
+    const text2sql = new Text2Sql({
+      version: 'v1',
+      model: openai('gpt-4o'),
+      // ...
+    });
+    ```
+  </Tab>
+  <Tab title="Anthropic">
+    ```typescript
+    import { anthropic } from '@ai-sdk/anthropic';
+
+    const text2sql = new Text2Sql({
+      version: 'v1',
+      model: anthropic('claude-sonnet-4-20250514'),
+      // ...
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Usage
+
+### Custom Context Store
+
+```typescript
+import { SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./text2sql-context.db');
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: groq('llama-3.3-70b-versatile'),
+  adapter,
+  store, // Persistent context
+});
+```
+
+### Version Management
+
+Use versioning for schema changes:
+
+```typescript
+const text2sql_v1 = new Text2Sql({
+  version: 'v1',
+  // ...
+});
+
+const text2sql_v2 = new Text2Sql({
+  version: 'v2', // New schema version
+  // ...
+});
+```
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/text2sql](https://www.npmjs.com/package/@deepagents/text2sql)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/context" icon="layer-group" href="/packages/context">
+    Fragment builders for domain knowledge
+  </Card>
+  <Card title="@deepagents/evals" icon="chart-line" href="/packages/evals">
+    Evaluate SQL accuracy
+  </Card>
+</CardGroup>

@@ -1,0 +1,147 @@
+---
+title: Installation
+description: Install @deepagents/evals and get started with LLM evaluation
+---
+
+# Installation
+
+## Package Manager
+
+Install `@deepagents/evals` using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @deepagents/evals
+```
+
+```bash yarn
+yarn add @deepagents/evals
+```
+
+```bash pnpm
+pnpm add @deepagents/evals
+```
+
+</CodeGroup>
+
+## Version
+
+The current version is `0.23.0`. Check the [GitHub repository](https://github.com/JanuaryLabs/deepagents) for the latest releases.
+
+## Dependencies
+
+The package has two main dependencies:
+
+- **autoevals** (v0.0.132) — Powers LLM-based scorers like `factuality`
+- **chalk** (v5.6.0) — Terminal colors for console reporter
+
+These are automatically installed when you add `@deepagents/evals` to your project.
+
+## Subpath Exports
+
+The package uses Node.js subpath exports for tree-shakeable imports. You can import from specific modules:
+
+```typescript
+// Top-level API
+import { evaluate } from '@deepagents/evals';
+
+// Granular imports
+import { dataset } from '@deepagents/evals/dataset';
+import { exactMatch, factuality } from '@deepagents/evals/scorers';
+import { RunStore } from '@deepagents/evals/store';
+import { EvalEmitter, runEval } from '@deepagents/evals/engine';
+import { compareRuns } from '@deepagents/evals/comparison';
+import { consoleReporter } from '@deepagents/evals/reporters';
+```
+
+## TypeScript Support
+
+Full TypeScript support is included. All types are exported from their respective modules:
+
+```typescript
+import type { 
+  EvaluateOptions, 
+  Scorer, 
+  ScorerResult,
+  RunSummary,
+  ComparisonResult
+} from '@deepagents/evals';
+```
+
+## Environment Setup
+
+### Node.js Version
+
+The package requires Node.js with support for:
+
+- Native `node:sqlite` module (Node.js 22.5.0+)
+- ECMAScript modules (ESM)
+- `AsyncIterable` and generator functions
+
+Make sure you're running a compatible Node.js version.
+
+### SQLite Storage
+
+By default, evaluation runs are stored in `.evals/store.db` in your project root. The directory is created automatically:
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+// Default location: .evals/store.db
+const store = new RunStore();
+
+// Custom location
+const store = new RunStore('./my-evals/results.db');
+```
+
+Add `.evals/` to your `.gitignore` if you don't want to commit evaluation results:
+
+```bash .gitignore
+.evals/
+```
+
+### LLM API Keys
+
+If you use LLM-based scorers like `factuality`, you'll need an OpenAI API key:
+
+```bash .env
+OPENAI_API_KEY=sk-...
+```
+
+The `autoevals` library (used by `factuality`) reads from environment variables automatically.
+
+## Verification
+
+Verify your installation by running a simple evaluation:
+
+```typescript
+import { dataset, evaluate, exactMatch } from '@deepagents/evals';
+import { consoleReporter } from '@deepagents/evals/reporters';
+import { RunStore } from '@deepagents/evals/store';
+
+const summary = await evaluate({
+  name: 'test-install',
+  model: 'test',
+  dataset: dataset([{ input: '2+2', expected: '4' }]),
+  task: async (item) => ({ output: '4' }),
+  scorers: { exact: exactMatch },
+  reporters: [consoleReporter()],
+  store: new RunStore(),
+});
+
+console.log('Installation verified!', summary);
+```
+
+If this runs without errors, you're ready to go!
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/evals/quickstart">
+    Run your first real evaluation
+  </Card>
+  <Card title="Datasets" icon="database" href="/evals/datasets">
+    Learn about dataset loading
+  </Card>
+</CardGroup>

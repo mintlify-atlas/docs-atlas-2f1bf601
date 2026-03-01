@@ -1,0 +1,538 @@
+---
+title: '@deepagents/agent'
+description: 'Core agent framework for building multi-agent AI systems'
+---
+
+## Overview
+
+The `@deepagents/agent` package provides the foundation for building multi-agent AI systems with TypeScript. It offers agent composition, tool integration, handoffs, structured output, streaming, and type-safe context management.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @deepagents/agent ai zod
+```
+
+```bash pnpm
+pnpm add @deepagents/agent ai zod
+```
+
+```bash yarn
+yarn add @deepagents/agent ai zod
+```
+</CodeGroup>
+
+**Peer Dependencies:**
+- `zod` ^3.25.76 || ^4.0.0
+- `ai` (included automatically)
+
+**Model Provider** (choose one or more):
+```bash
+npm install @ai-sdk/openai
+npm install @ai-sdk/anthropic
+npm install @ai-sdk/google
+npm install @ai-sdk/groq
+```
+
+## Quick Example
+
+```typescript
+import { agent, execute, swarm, instructions } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+// Create a specialist agent
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'You research topics thoroughly.',
+  handoffDescription: 'Handles research and fact-finding',
+  tools: {
+    search: tool({
+      description: 'Search for information',
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => performSearch(query),
+    }),
+  },
+});
+
+// Create a coordinator
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions({
+    purpose: ['Coordinate research tasks'],
+    routine: ['Analyze request', 'Delegate to researcher', 'Synthesize results'],
+  }),
+  handoffs: [researcher],
+});
+
+// Execute with streaming
+const stream = swarm(coordinator, 'Research AI agents', {});
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Core API
+
+### `agent(config)`
+
+Creates a new agent.
+
+```typescript
+function agent<Output, CIn, COut>(config: CreateAgent<Output, CIn, COut>): Agent<Output, CIn, COut>
+```
+
+**Configuration:**
+
+```typescript
+interface CreateAgent<Output, CIn, COut> {
+  // Required
+  name: string;                       // Unique identifier
+  model: LanguageModel;               // AI SDK model
+  prompt: Instruction<CIn>;           // String, array, or function
+  
+  // Optional
+  tools?: ToolSet;                    // Available tools
+  handoffs?: Agent[];                 // Agents to delegate to
+  handoffDescription?: string;        // When to use this agent
+  output?: z.Schema<Output>;          // Structured output schema
+  toolChoice?: ToolChoice;            // 'auto' | 'required' | 'none'
+  temperature?: number;               // Model temperature
+  prepareHandoff?: PrepareHandoffFn;  // Pre-handoff hook
+  prepareEnd?: PrepareEndFn;          // Post-execution hook
+}
+```
+
+**Example:**
+
+```typescript
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful AI assistant.',
+  temperature: 0.7,
+});
+```
+
+### `execute(agent, messages, context, config?)`
+
+Executes an agent with streaming support.
+
+```typescript
+function execute<CIn>(
+  agent: Agent<unknown, CIn>,
+  messages: string | UIMessage[],
+  context: CIn,
+  config?: ExecuteConfig
+): StreamTextResult
+```
+
+**Returns:**
+
+```typescript
+interface StreamTextResult {
+  textStream: AsyncIterable<string>;
+  fullStream: AsyncIterable<StreamChunk>;
+  text: Promise<string>;
+  usage: Promise<TokenUsage>;
+  finishReason: Promise<FinishReason>;
+}
+```
+
+**Example:**
+
+```typescript
+const stream = execute(agent, 'Hello!', {});
+
+// Stream text
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Or get complete text
+const text = await stream.text;
+```
+
+### `generate(agent, messages, context, config?)`
+
+Non-streaming execution. Returns complete result.
+
+```typescript
+function generate<CIn, Output>(
+  agent: Agent<Output, CIn>,
+  messages: string | UIMessage[],
+  context: CIn,
+  config?: GenerateConfig
+): Promise<GenerateResult<Output>>
+```
+
+**Returns:**
+
+```typescript
+interface GenerateResult<Output> {
+  text: string;
+  usage: TokenUsage;
+  finishReason: FinishReason;
+  output?: Output;  // If output schema defined
+}
+```
+
+**Example:**
+
+```typescript
+const result = await generate(agent, 'Explain AI', {});
+console.log(result.text);
+console.log('Tokens:', result.usage.totalTokens);
+```
+
+### `swarm(agent, messages, context, abortSignal?)`
+
+High-level multi-agent execution with handoff support.
+
+```typescript
+function swarm<CIn>(
+  agent: Agent<unknown, CIn>,
+  messages: string | UIMessage[],
+  context: CIn,
+  abortSignal?: AbortSignal
+): SwarmResult
+```
+
+**Returns:**
+
+```typescript
+interface SwarmResult {
+  textStream: AsyncIterable<string>;
+  text: Promise<string>;
+  messages: Promise<UIMessage[]>;
+  agent: Promise<Agent>;
+}
+```
+
+**Example:**
+
+```typescript
+const controller = new AbortController();
+const stream = swarm(coordinator, 'Complete task', {}, controller.signal);
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+### `instructions(config)`
+
+Creates structured prompts for agents.
+
+```typescript
+function instructions(config: {
+  purpose: string | string[];
+  routine: string[];
+}): string
+```
+
+**Example:**
+
+```typescript
+const prompt = instructions({
+  purpose: ['You coordinate development tasks'],
+  routine: [
+    'Analyze the request',
+    'Break into subtasks',
+    'Delegate to specialists',
+    'Synthesize results',
+  ],
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt,
+  handoffs: [/* specialists */],
+});
+```
+
+For swarm-specific instructions:
+
+```typescript
+const prompt = instructions.swarm({
+  purpose: ['Coordinate specialist agents'],
+  routine: ['Route appropriately', 'Ensure quality'],
+});
+```
+
+### `toState<T>(options)`
+
+Access context inside tools.
+
+```typescript
+function toState<T>(options: ToolCallOptions): T
+```
+
+**Example:**
+
+```typescript
+import { toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+}
+
+const tool = tool({
+  description: 'Save data',
+  parameters: z.object({ data: z.string() }),
+  execute: async ({ data }, options) => {
+    const ctx = toState<AppContext>(options);
+    console.log('User:', ctx.userId);
+    return { saved: true };
+  },
+});
+```
+
+### `user(message)`
+
+Creates a user message.
+
+```typescript
+function user(content: string): UIMessage
+```
+
+**Example:**
+
+```typescript
+import { user } from '@deepagents/agent';
+
+const stream = execute(agent, [
+  user('Hello'),
+  user('How are you?'),
+], {});
+```
+
+## Advanced Features
+
+### Structured Output
+
+Define typed output schemas:
+
+```typescript
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze sentiment.',
+  output: z.object({
+    sentiment: z.enum(['positive', 'negative', 'neutral']),
+    confidence: z.number().min(0).max(1),
+    keywords: z.array(z.string()),
+  }),
+});
+
+const result = await generate(analyzer, 'I love this!', {});
+console.log(result.output);
+// {
+//   sentiment: 'positive',
+//   confidence: 0.95,
+//   keywords: ['love']
+// }
+```
+
+### Context Functions
+
+Dynamic prompts based on context:
+
+```typescript
+interface UserContext {
+  userId: string;
+  preferences: Record<string, any>;
+}
+
+const agent = agent<unknown, UserContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    return [
+      `You are helping user ${ctx?.userId}`,
+      `User preferences: ${JSON.stringify(ctx?.preferences)}`,
+    ].join('\n');
+  },
+});
+```
+
+### Lifecycle Hooks
+
+#### prepareHandoff
+
+Runs before transferring to this agent:
+
+```typescript
+const specialist = agent({
+  name: 'specialist',
+  model: openai('gpt-4o'),
+  prompt: 'Specialist tasks.',
+  prepareHandoff: async (messages) => {
+    console.log('Receiving handoff with', messages.length, 'messages');
+    // Log, modify messages, etc.
+  },
+});
+```
+
+#### prepareEnd
+
+Runs after this agent completes:
+
+```typescript
+interface WorkflowContext {
+  steps: string[];
+}
+
+const processor = agent<unknown, WorkflowContext>({
+  name: 'processor',
+  model: openai('gpt-4o'),
+  prompt: 'Process data.',
+  prepareEnd: async ({ contextVariables, responseMessage }) => {
+    contextVariables.steps.push('processing');
+    console.log('Processor completed');
+  },
+});
+```
+
+## Utilities
+
+### `toOutput<T>(result)`
+
+Extract structured output from result:
+
+```typescript
+import { toOutput } from '@deepagents/agent';
+
+const result = await generate(analyzerAgent, input, {});
+const output = await toOutput(result);
+```
+
+### `stream()`
+
+Alias for `execute()`:
+
+```typescript
+import { stream } from '@deepagents/agent';
+
+const result = stream(agent, message, context);
+```
+
+## TypeScript Types
+
+### Agent Type Parameters
+
+```typescript
+Agent<Output, CIn, COut>
+```
+
+- `Output`: Structured output type (if using `output` schema)
+- `CIn`: Input context type
+- `COut`: Output context type (defaults to `CIn`)
+
+**Example:**
+
+```typescript
+interface InputContext {
+  userId: string;
+}
+
+interface OutputContext extends InputContext {
+  processedData: any;
+}
+
+interface AnalysisOutput {
+  score: number;
+  category: string;
+}
+
+const agent: Agent<AnalysisOutput, InputContext, OutputContext> = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze.',
+  output: z.object({
+    score: z.number(),
+    category: z.string(),
+  }),
+});
+```
+
+## Model Providers
+
+Compatible with all [Vercel AI SDK](https://sdk.vercel.ai/docs) providers:
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```typescript
+    import { openai } from '@ai-sdk/openai';
+    
+    const agent = agent({
+      name: 'assistant',
+      model: openai('gpt-4o'),
+      prompt: '...',
+    });
+    ```
+  </Tab>
+  <Tab title="Anthropic">
+    ```typescript
+    import { anthropic } from '@ai-sdk/anthropic';
+    
+    const agent = agent({
+      name: 'assistant',
+      model: anthropic('claude-sonnet-4-20250514'),
+      prompt: '...',
+    });
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```typescript
+    import { google } from '@ai-sdk/google';
+    
+    const agent = agent({
+      name: 'assistant',
+      model: google('gemini-1.5-pro'),
+      prompt: '...',
+    });
+    ```
+  </Tab>
+  <Tab title="Groq">
+    ```typescript
+    import { groq } from '@ai-sdk/groq';
+    
+    const agent = agent({
+      name: 'assistant',
+      model: groq('llama-3.3-70b-versatile'),
+      prompt: '...',
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Package Info
+
+- **Version:** 0.23.0
+- **License:** MIT
+- **Repository:** [github.com/JanuaryLabs/deepagents](https://github.com/JanuaryLabs/deepagents)
+- **Package:** [@deepagents/agent](https://www.npmjs.com/package/@deepagents/agent)
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@deepagents/context" icon="layer-group" href="/packages/context">
+    Context management and fragments
+  </Card>
+  <Card title="@deepagents/toolbox" icon="toolbox" href="/packages/toolbox">
+    Pre-built tools for agents
+  </Card>
+  <Card title="@deepagents/orchestrator" icon="diagram-project" href="/packages/orchestrator">
+    High-level orchestration patterns
+  </Card>
+</CardGroup>
+
+## Examples
+
+Find complete examples in the [GitHub repository](https://github.com/JanuaryLabs/deepagents/tree/main/packages/agent/src/lib/examples).

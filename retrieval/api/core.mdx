@@ -1,0 +1,454 @@
+---
+title: 'Core API Reference'
+description: 'API documentation for ingest() and similaritySearch()'
+---
+
+# Core API Reference
+
+Complete API reference for the core retrieval functions: `ingest()` and `similaritySearch()`.
+
+## ingest()
+
+Ingest documents from a connector into a vector store.
+
+### Signature
+
+```typescript
+async function ingest(
+  config: IngestionConfig,
+  callback?: (documentId: string) => void
+): Promise<void>
+```
+
+### Parameters
+
+#### config
+
+**Type:** `IngestionConfig`
+
+Ingestion configuration object.
+
+```typescript
+interface IngestionConfig {
+  connector: Connector;  // Source of documents
+  store: Store;         // Vector storage backend
+  embedder: Embedder;   // Embedding function
+  splitter?: Splitter;  // Optional text splitter
+}
+```
+
+**connector** - `Connector`
+
+Connector that provides documents to ingest. See [Connectors](/retrieval/connectors).
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('**/*.md');
+```
+
+**store** - `Store`
+
+Vector store for saving embeddings. See [Stores API](/retrieval/api/stores).
+
+```typescript
+import { SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+```
+
+**embedder** - `Embedder`
+
+Function that converts text to embeddings. See [Embeddings](/retrieval/embeddings).
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+const embedder = fastembed({ model: 'BGESmallENV15' });
+```
+
+**splitter** - `Splitter` (optional)
+
+Custom text splitting function. Default: `MarkdownTextSplitter`.
+
+```typescript
+import { splitTypeScript } from '@deepagents/retrieval';
+
+const splitter = splitTypeScript;
+```
+
+#### callback
+
+**Type:** `(documentId: string) => void` (optional)
+
+Callback invoked for each processed document.
+
+```typescript
+await ingest(config, (documentId) => {
+  console.log(`Processing: ${documentId}`);
+});
+```
+
+### Returns
+
+**Type:** `Promise<void>`
+
+Resolves when ingestion completes.
+
+### Example
+
+```typescript
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+await ingest(
+  {
+    connector: local('**/*.md'),
+    store,
+    embedder,
+  },
+  (id) => console.log(`Processed: ${id}`)
+);
+```
+
+### Source Code
+
+Location: `/home/daytona/workspace/source/packages/retrieval/src/lib/ingest.ts:18-54`
+
+## similaritySearch()
+
+Search for relevant documents using semantic similarity.
+
+### Signature
+
+```typescript
+async function similaritySearch(
+  query: string,
+  config: Omit<IngestionConfig, 'splitter'>
+): Promise<SearchResult[]>
+```
+
+### Parameters
+
+#### query
+
+**Type:** `string`
+
+Natural language search query.
+
+```typescript
+const results = await similaritySearch(
+  'How do I install the package?',
+  config
+);
+```
+
+#### config
+
+**Type:** `Omit<IngestionConfig, 'splitter'>`
+
+Search configuration (same as ingestion, without splitter).
+
+```typescript
+{
+  connector: Connector;
+  store: Store;
+  embedder: Embedder;
+}
+```
+
+### Returns
+
+**Type:** `Promise<SearchResult[]>`
+
+Array of search results sorted by similarity (highest first).
+
+```typescript
+interface SearchResult {
+  content: string;       // Chunk text
+  document_id: string;   // Source document ID
+  distance: number;      // Cosine distance (0-1, lower is better)
+  similarity: number;    // Similarity score (1 - distance)
+  metadata: object | null; // Document metadata
+}
+```
+
+### Example
+
+```typescript
+import { similaritySearch, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+const results = await similaritySearch(
+  'How do I get started?',
+  {
+    connector: github.file('facebook/react/README.md'),
+    store,
+    embedder,
+  }
+);
+
+console.log(results[0]);
+// {
+//   content: '## Getting Started\n\nInstall React...',
+//   document_id: 'facebook/react/README.md',
+//   distance: 0.123,
+//   similarity: 0.877,
+//   metadata: null
+// }
+```
+
+### Automatic Ingestion
+
+The function automatically handles ingestion based on `connector.ingestWhen`:
+
+- `contentChanged` (default) - Always attempts ingestion, skips unchanged
+- `never` - Only ingests if source doesn't exist
+- `expired` - Only ingests if source expired or doesn't exist
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'never', // Only ingest once
+});
+
+const results = await similaritySearch('query', {
+  connector,
+  store,
+  embedder,
+});
+// Automatically ingests if needed
+```
+
+### Top N Results
+
+Default returns top 50 results. Controlled by store implementation.
+
+```typescript
+const results = await similaritySearch('query', config);
+console.log(results.length); // Up to 50
+
+const top10 = results.slice(0, 10);
+```
+
+### Source Code
+
+Location: `/home/daytona/workspace/source/packages/retrieval/src/lib/similiarty-search.ts:5-56`
+
+## Type Definitions
+
+### Splitter
+
+```typescript
+type Splitter = (
+  documentId: string,
+  content: string
+) => Promise<string[]> | string[];
+```
+
+Function that splits document content into chunks.
+
+**Parameters:**
+- `documentId` - Document identifier
+- `content` - Document text
+
+**Returns:**
+- Array of text chunks
+
+### Example Splitter
+
+```typescript
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+
+const customSplitter: Splitter = async (id, content) => {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+  });
+  return await splitter.splitText(content);
+};
+```
+
+## Built-in Splitters
+
+### splitTypeScript()
+
+TypeScript-aware text splitting.
+
+```typescript
+async function splitTypeScript(
+  id: string,
+  content: string
+): Promise<string[]>
+```
+
+**Configuration:**
+- Chunk size: 512 characters
+- Chunk overlap: 100 characters
+- Language: JavaScript (works for TypeScript)
+
+**Example:**
+
+```typescript
+import { splitTypeScript } from '@deepagents/retrieval';
+
+await ingest({
+  connector: local('src/**/*.ts'),
+  store,
+  embedder,
+  splitter: splitTypeScript,
+});
+```
+
+### splitTypeScriptWithPositions()
+
+TypeScript splitting with position tracking.
+
+```typescript
+async function splitTypeScriptWithPositions(
+  id: string,
+  content: string
+): Promise<SplitChunkWithPosition[]>
+```
+
+**Returns:**
+
+```typescript
+interface SplitChunkWithPosition {
+  content: string;
+  index: number;
+  position: ChunkPosition | null;
+}
+
+interface ChunkPosition {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+```
+
+**Example:**
+
+```typescript
+import { splitTypeScriptWithPositions } from '@deepagents/retrieval';
+
+const chunks = await splitTypeScriptWithPositions(
+  'file.ts',
+  fileContent
+);
+
+chunks.forEach(chunk => {
+  console.log(`Line ${chunk.position?.startLine}:`);
+  console.log(chunk.content);
+});
+```
+
+## Content ID (CID)
+
+### cid()
+
+Generate content identifier using SHA-256 hash.
+
+```typescript
+function cid(content: string): string
+```
+
+**Parameters:**
+- `content` - Content to hash
+
+**Returns:**
+- Content identifier (format: `bafkrei...`)
+
+**Example:**
+
+```typescript
+import { cid } from '@deepagents/retrieval';
+
+const contentId = cid('file content here');
+console.log(contentId);
+// "bafkreih..."
+```
+
+Used internally for change detection.
+
+## Error Handling
+
+### Ingestion Errors
+
+```typescript
+try {
+  await ingest({ connector, store, embedder });
+} catch (error) {
+  console.error('Ingestion failed:', error);
+}
+```
+
+### Search Errors
+
+```typescript
+try {
+  const results = await similaritySearch('query', config);
+} catch (error) {
+  console.error('Search failed:', error);
+}
+```
+
+### Common Errors
+
+- `Source not found` - Connector failed to fetch content
+- `Embedding failed` - Embedder error
+- `Database error` - Store operation failed
+- `Invalid dimensions` - Embedder/store dimension mismatch
+
+## Performance
+
+### Batching
+
+Ingestion automatically batches embeddings:
+
+```typescript
+const batchSize = 40; // Default
+```
+
+This controls memory usage during processing.
+
+### Concurrency
+
+Operations are sequential by default. For parallel ingestion:
+
+```typescript
+const connectors = [connector1, connector2, connector3];
+
+await Promise.all(
+  connectors.map(c => ingest({ connector: c, store, embedder }))
+);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Connector API" icon="plug" href="/retrieval/api/connectors">
+    Connector interface reference
+  </Card>
+  <Card title="Store API" icon="database" href="/retrieval/api/stores">
+    Store interface reference
+  </Card>
+  <Card title="Ingestion Guide" icon="book" href="/retrieval/ingestion">
+    Learn about ingestion
+  </Card>
+  <Card title="Search Guide" icon="magnifying-glass" href="/retrieval/search">
+    Learn about search
+  </Card>
+</CardGroup>

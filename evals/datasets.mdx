@@ -1,0 +1,310 @@
+---
+title: Datasets
+description: Dataset loading, transforms, and lazy evaluation
+---
+
+# Datasets
+
+Datasets in `@deepagents/evals` are lazy, chainable iterables that load test cases for evaluation.
+
+## Loading Datasets
+
+### From Arrays
+
+The simplest way to create a dataset is from an inline array:
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+
+const ds = dataset([
+  { input: 'What is 2+2?', expected: '4' },
+  { input: 'What is 3+3?', expected: '6' },
+]);
+```
+
+### From JSON Files
+
+Load from a JSON file containing an array:
+
+```json questions.json
+[
+  { "input": "What is 2+2?", "expected": "4" },
+  { "input": "What is 3+3?", "expected": "6" }
+]
+```
+
+```typescript
+const ds = dataset('./questions.json');
+```
+
+### From JSONL Files
+
+Load from a JSONL (JSON Lines) file where each line is a JSON object:
+
+```jsonl questions.jsonl
+{"input": "What is 2+2?", "expected": "4"}
+{"input": "What is 3+3?", "expected": "6"}
+```
+
+```typescript
+const ds = dataset('./questions.jsonl');
+```
+
+<Tip>
+JSONL is recommended for large datasets because it's memory-efficient and lazy-loaded.
+</Tip>
+
+### From CSV Files
+
+Load from a CSV file with a header row:
+
+```csv questions.csv
+input,expected
+"What is 2+2?","4"
+"What is 3+3?","6"
+```
+
+```typescript
+const ds = dataset('./questions.csv');
+```
+
+<Note>
+CSV files are parsed row-by-row. Each row becomes a `Record<string, string>` object.
+</Note>
+
+### From AsyncIterable
+
+You can also wrap any `AsyncIterable`:
+
+```typescript
+async function* loadFromDB() {
+  const rows = await db.query('SELECT * FROM test_cases');
+  for (const row of rows) {
+    yield { input: row.question, expected: row.answer };
+  }
+}
+
+const ds = dataset(loadFromDB());
+```
+
+## Dataset Schema
+
+Each dataset item should have at minimum:
+
+```typescript
+interface DatasetItem {
+  input: unknown;     // Passed to the task function
+  expected?: unknown; // Passed to scorers for comparison
+}
+```
+
+You can include any additional fields:
+
+```typescript
+const ds = dataset([
+  { 
+    input: 'What is 2+2?', 
+    expected: '4',
+    difficulty: 'easy',
+    category: 'arithmetic',
+  },
+]);
+```
+
+## Transform Methods
+
+Datasets support chainable transforms. These are **lazy** — transforms are applied during iteration, not when called.
+
+### `map(fn)`
+
+Transform each item:
+
+```typescript
+const ds = dataset('./raw-data.json')
+  .map((row) => ({
+    input: row.question,
+    expected: row.answer,
+  }));
+```
+
+**Lazy:** ✅ Items are transformed as they're consumed.
+
+### `filter(fn)`
+
+Exclude items that don't match a predicate:
+
+```typescript
+const ds = dataset('./data.json')
+  .filter((row) => row.difficulty === 'hard');
+```
+
+**Lazy:** ✅ Items are filtered as they're consumed.
+
+### `limit(n)`
+
+Cap the dataset at `n` items:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .limit(100); // Only use the first 100 items
+```
+
+**Lazy:** ✅ Stops iteration after `n` items.
+
+### `shuffle()`
+
+Randomize the order of items:
+
+```typescript
+const ds = dataset('./data.json')
+  .shuffle();
+```
+
+**Eager:** ⚠️ Buffers all items into memory before shuffling.
+
+### `sample(n)`
+
+Pick `n` random items:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .sample(50); // Pick 50 random items
+```
+
+**Eager:** ⚠️ Buffers all items into memory before sampling.
+
+### `toArray()`
+
+Consume the dataset into a plain array:
+
+```typescript
+const items = await dataset('./data.json').toArray();
+console.log(items.length);
+```
+
+**Eager:** ⚠️ Loads all items into memory.
+
+## Chaining Transforms
+
+Transforms can be chained together:
+
+```typescript
+const ds = dataset('./large-dataset.jsonl')
+  .filter((row) => row.difficulty === 'hard')
+  .map((row) => ({ input: row.question, expected: row.answer }))
+  .shuffle()
+  .limit(100);
+```
+
+**Evaluation order:**
+
+1. Load from file (lazy)
+2. Filter by difficulty (lazy)
+3. Map to input/expected (lazy)
+4. Shuffle (eager — buffers all filtered items)
+5. Limit to 100 (lazy)
+
+<Warning>
+Putting `shuffle()` or `sample()` before `limit()` will buffer the entire dataset. Put `limit()` first to reduce memory usage:
+
+```typescript
+// ❌ Bad: Shuffles all 10M items
+dataset('./huge.jsonl').shuffle().limit(100);
+
+// ✅ Good: Shuffles only first 1000 items
+dataset('./huge.jsonl').limit(1000).shuffle().limit(100);
+```
+</Warning>
+
+## Hugging Face Datasets
+
+You can also load datasets from Hugging Face:
+
+```typescript
+import { hf } from '@deepagents/evals/dataset';
+
+const ds = hf({
+  repo: 'rajpurkar/squad',
+  split: 'validation',
+  limit: 100,
+});
+```
+
+See the [dataset API reference](/evals/api/dataset) for more details.
+
+## Record Selection
+
+You can select specific cases by index using the `pick()` method:
+
+```typescript
+import { parseRecordSelection } from '@deepagents/evals/dataset';
+
+const { indexes } = parseRecordSelection('0-10,15,20-25');
+const ds = dataset('./data.json').pick(indexes);
+```
+
+**Supported formats:**
+
+- `0-10` — Range from 0 to 10 (inclusive)
+- `5` — Single index
+- `0-10,15,20-25` — Multiple ranges and indexes
+
+This is used internally by `evaluate().cases('0-10,15')`.
+
+## Performance Tips
+
+### Use JSONL for Large Datasets
+
+JSONL is streamed line-by-line, so it's memory-efficient:
+
+```typescript
+// ✅ Good: Lazy-loads 1M items
+const ds = dataset('./1M-items.jsonl').limit(100);
+
+// ❌ Bad: Loads entire 1M-item array into memory
+const ds = dataset('./1M-items.json').limit(100);
+```
+
+### Filter Early
+
+Put `filter()` as early as possible to reduce downstream processing:
+
+```typescript
+// ✅ Good: Filter before expensive map
+dataset('./data.jsonl')
+  .filter((row) => row.difficulty === 'hard')
+  .map(expensiveTransform);
+
+// ❌ Bad: Map before filter
+dataset('./data.jsonl')
+  .map(expensiveTransform)
+  .filter((row) => row.difficulty === 'hard');
+```
+
+### Avoid Multiple Shuffles
+
+Each `shuffle()` buffers the dataset into memory:
+
+```typescript
+// ❌ Bad: Buffers twice
+dataset('./data.jsonl')
+  .shuffle()
+  .filter(somePredicate)
+  .shuffle(); // Buffers again
+
+// ✅ Good: Shuffle once
+dataset('./data.jsonl')
+  .filter(somePredicate)
+  .shuffle(); // Single buffer
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scorers" icon="star" href="/evals/scorers">
+    Learn about scoring functions
+  </Card>
+  <Card title="API Reference" icon="code" href="/evals/api/dataset">
+    Full dataset API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,376 @@
+---
+title: instructions()
+description: API reference for the instructions() helper
+---
+
+The `instructions()` helper creates well-structured, consistent prompts for agents. It formats instructions into a standardized template with purpose and routine sections.
+
+## Function Signature
+
+```typescript agent.ts:377:395
+export function instructions({ purpose, routine }: PurposeRoutineInstructions): string
+```
+
+## Parameters
+
+<ParamField path="purpose" type="string | string[]" required>
+  The agent's role or purpose. Can be a single string or array of strings.
+  
+  ```typescript
+  // Single string
+  purpose: 'You are a helpful assistant'
+  
+  // Multiple strings
+  purpose: [
+    'You are a data analyst.',
+    'You specialize in financial data.',
+  ]
+  ```
+</ParamField>
+
+<ParamField path="routine" type="string[]" required>
+  Step-by-step workflow for the agent. Array of strings.
+  
+  ```typescript
+  routine: [
+    'Analyze the user request',
+    'Gather necessary data',
+    'Provide a clear response',
+  ]
+  ```
+</ParamField>
+
+## Return Value
+
+Returns a formatted string:
+
+```text
+# Agent Context
+[purpose lines]
+
+
+<specialized_agents_placeholder>
+
+Use the following routine to fulfill the task.
+# Routine
+1. [first routine step]
+2. [second routine step]
+...
+```
+
+The `<specialized_agents_placeholder>` is replaced with handoff agent information when the agent has handoffs configured.
+
+## Variants
+
+### instructions.swarm()
+
+For multi-agent coordinators. Includes additional prompting about the multi-agent system:
+
+```typescript agent.ts:397:418
+instructions.swarm({ purpose, routine })
+```
+
+Adds a system context prefix:
+
+```text
+# System context
+You are part of a multi-agent system called the DeepAgents SDK...
+Handoffs are achieved by calling a handoff function, generally named `transfer_to_<agent_name>`.
+...
+
+# Agent Context
+[purpose]
+
+<specialized_agents_placeholder>
+
+# Routine
+...
+```
+
+### instructions.supervisor()
+
+For supervisor agents that coordinate multiple specialists:
+
+```typescript agent.ts:420:444
+instructions.supervisor({ purpose, routine })
+```
+
+Adds supervisor-specific directives:
+
+```text
+# System Context
+You are part of a multi-agent system called the DeepAgents SDK...
+
+Core Directives:
+- Begin with a concise checklist (3-7 bullets) of what you will do
+- Continue working until the user's query is completely resolved
+- Your thinking must be thorough and step-by-step
+...
+
+# Agent Context
+[purpose]
+
+<specialized_agents_placeholder>
+
+# Routine
+...
+```
+
+### instructions.supervisor_subagent()
+
+For agents that work under a supervisor:
+
+```typescript agent.ts:446:478
+instructions.supervisor_subagent({ purpose, routine })
+```
+
+Adds automatic transfer back to supervisor at the end of the routine.
+
+## Examples
+
+### Basic Usage
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const dataAnalyst = agent({
+  name: 'data_analyst',
+  model: openai('gpt-4o'),
+  prompt: instructions({
+    purpose: [
+      'You are a data analyst specializing in business intelligence.',
+      'You help users understand their data through clear insights.',
+    ],
+    routine: [
+      'Examine the provided data carefully',
+      'Identify key patterns and trends',
+      'Calculate relevant statistics',
+      'Present findings in a clear, actionable format',
+    ],
+  }),
+});
+```
+
+### Multi-Agent Coordinator
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+
+const researcher = agent({
+  name: 'researcher',
+  model: openai('gpt-4o'),
+  prompt: 'Research topics thoroughly.',
+  handoffDescription: 'Handles research tasks',
+});
+
+const writer = agent({
+  name: 'writer',
+  model: openai('gpt-4o'),
+  prompt: 'Write engaging content.',
+  handoffDescription: 'Handles writing tasks',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4o'),
+  prompt: instructions.swarm({
+    purpose: ['Coordinate research and writing to complete user requests'],
+    routine: [
+      'Analyze the user request',
+      'Use transfer_to_researcher for information gathering',
+      'Use transfer_to_writer for content creation',
+      'Review and refine the output',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+```
+
+### Supervisor Pattern
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+
+const supervisor = agent({
+  name: 'supervisor',
+  model: openai('gpt-4o'),
+  prompt: instructions.supervisor({
+    purpose: [
+      'You are a project supervisor coordinating multiple specialist agents.',
+      'Delegate tasks and review results to ensure quality.',
+    ],
+    routine: [
+      'Break down the user request into subtasks',
+      'Delegate each subtask to the appropriate specialist',
+      'Review specialist outputs',
+      'Synthesize results into a cohesive response',
+    ],
+  }),
+  handoffs: [specialist1, specialist2, specialist3],
+});
+```
+
+### Research Bot Example
+
+From the source code:
+
+```typescript research_bot.ts:48:53
+const planner = agent({
+  model: openai('gpt-4o'),
+  name: 'PlannerAgent',
+  output: WebSearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a helpful research assistant. Given a query, come up with a set of web searches to perform to best answer the query.',
+    ],
+    routine: ['Output between 5 and 10 terms to query for.'],
+  }),
+});
+```
+
+### Financial Analysis Example
+
+From the source code:
+
+```typescript finanicals_bot.ts:73:83
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      "You are a risk analyst looking for potential red flags in a company's outlook.",
+      'Given background research, produce a short analysis of risks such as competitive threats, regulatory issues, supply chain problems, or slowing growth.',
+    ],
+    routine: ['Keep it under 2 paragraphs.'],
+  }),
+});
+```
+
+## Handoff Agent List
+
+When an agent has handoffs, the `<specialized_agents_placeholder>` is replaced with a formatted table:
+
+```text
+## Specialized Agents
+
+| Agent Name | Agent Description |
+| --- | --- |
+| researcher | Handles research and fact-finding tasks |
+| writer | Handles writing and content creation |
+```
+
+This is automatically generated from the `handoffDescription` of each handoff agent.
+
+## Custom Prompt Formats
+
+You can combine `instructions()` with additional custom text:
+
+```typescript
+const customAgent = agent({
+  name: 'custom_agent',
+  model: openai('gpt-4o'),
+  prompt: [
+    instructions({
+      purpose: ['You are a helpful assistant'],
+      routine: ['Help the user', 'Be clear and concise'],
+    }),
+    '',
+    '## Additional Guidelines',
+    '- Always be polite',
+    '- Verify facts before stating them',
+    '- Ask for clarification when needed',
+  ].join('\n'),
+});
+```
+
+## Dynamic Instructions with Context
+
+Combine with context-aware prompts:
+
+```typescript
+interface UserContext {
+  userId: string;
+  expertiseLevel: 'beginner' | 'intermediate' | 'expert';
+}
+
+const tutorAgent = agent<unknown, UserContext>({
+  name: 'tutor',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => {
+    const baseInstructions = instructions({
+      purpose: ['You are a programming tutor'],
+      routine: [
+        'Assess the user\'s question',
+        'Provide clear explanations',
+        'Give relevant examples',
+      ],
+    });
+    
+    const levelGuidance = ctx?.expertiseLevel === 'beginner'
+      ? '\n\nUse simple language and avoid jargon.'
+      : ctx?.expertiseLevel === 'expert'
+      ? '\n\nYou can use technical terminology and advanced concepts.'
+      : '\n\nBalance simplicity with technical accuracy.';
+    
+    return baseInstructions + levelGuidance;
+  },
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Be Specific in Purpose">
+    Clearly define what the agent does:
+    
+    ```typescript
+    // ✅ Good - specific
+    purpose: [
+      'You are a financial analyst specializing in tech companies.',
+      'You analyze earnings reports and market trends.',
+    ]
+    
+    // ❌ Vague
+    purpose: 'You help with finance'
+    ```
+  </Accordion>
+  
+  <Accordion title="Actionable Routine Steps">
+    Make routine steps concrete and actionable:
+    
+    ```typescript
+    // ✅ Good - actionable
+    routine: [
+      'Read the user\'s question carefully',
+      'Search for relevant documentation',
+      'Provide code examples from the docs',
+      'Verify the examples work',
+    ]
+    
+    // ❌ Vague
+    routine: ['Help the user', 'Do a good job']
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Appropriate Variant">
+    Choose the right variant for your use case:
+    
+    - `instructions()` - Single agent
+    - `instructions.swarm()` - Multi-agent coordinator
+    - `instructions.supervisor()` - Supervisor coordinating specialists
+    - `instructions.supervisor_subagent()` - Specialist under a supervisor
+  </Accordion>
+</AccordionGroup>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="agent()" icon="robot" href="/agent/api/agent">
+    Create agents
+  </Card>
+  <Card title="Multi-Agent Guide" icon="users" href="/agent/multi-agent">
+    Build multi-agent systems
+  </Card>
+</CardGroup>

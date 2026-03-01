@@ -1,0 +1,364 @@
+---
+title: 'Installation'
+description: 'Install DeepAgents packages and configure your development environment'
+---
+
+## Requirements
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node">
+    Node.js LTS (20+) required
+  </Card>
+  <Card title="TypeScript" icon="code">
+    TypeScript 5.0+ recommended
+  </Card>
+</CardGroup>
+
+<Note>
+DeepAgents is designed for modern Node.js environments with native TypeScript support. All packages are ESM-only.
+</Note>
+
+## Core Packages
+
+### @deepagents/agent
+
+The core agent framework for building multi-agent systems.
+
+```bash
+npm install @deepagents/agent ai zod
+```
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @deepagents/agent ai zod
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @deepagents/agent ai zod
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @deepagents/agent ai zod
+    ```
+  </Tab>
+</Tabs>
+
+**Peer Dependencies:**
+- `zod` ^3.25.76 || ^4.0.0 - Schema validation
+- `ai` (automatically installed) - Vercel AI SDK
+
+### Model Provider SDKs
+
+Install the model provider you want to use:
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```bash
+    npm install @ai-sdk/openai
+    ```
+    ```typescript
+    import { openai } from '@ai-sdk/openai';
+    const model = openai('gpt-4o');
+    ```
+  </Tab>
+  <Tab title="Anthropic">
+    ```bash
+    npm install @ai-sdk/anthropic
+    ```
+    ```typescript
+    import { anthropic } from '@ai-sdk/anthropic';
+    const model = anthropic('claude-sonnet-4-20250514');
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```bash
+    npm install @ai-sdk/google
+    ```
+    ```typescript
+    import { google } from '@ai-sdk/google';
+    const model = google('gemini-1.5-pro');
+    ```
+  </Tab>
+  <Tab title="Groq">
+    ```bash
+    npm install @ai-sdk/groq
+    ```
+    ```typescript
+    import { groq } from '@ai-sdk/groq';
+    const model = groq('llama-3.3-70b-versatile');
+    ```
+  </Tab>
+</Tabs>
+
+### @deepagents/context
+
+Context management with multiple rendering formats.
+
+```bash
+npm install @deepagents/context
+```
+
+<Warning>
+For browser environments, use the browser-specific export to avoid server-only dependencies:
+```typescript
+import { term, hint, XmlRenderer } from '@deepagents/context/browser';
+```
+</Warning>
+
+### @deepagents/text2sql
+
+Natural language to SQL with database adapters.
+
+```bash
+npm install @deepagents/text2sql
+```
+
+**Database-Specific Peer Dependencies:**
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install pg @types/pg
+    ```
+    ```typescript
+    import { Postgres } from '@deepagents/text2sql/postgres';
+    ```
+  </Tab>
+  <Tab title="SQLite">
+    No additional dependencies required.
+    ```typescript
+    import { Sqlite } from '@deepagents/text2sql/sqlite';
+    ```
+  </Tab>
+  <Tab title="SQL Server">
+    ```bash
+    npm install mssql @types/mssql
+    ```
+    ```typescript
+    import { SqlServer } from '@deepagents/text2sql/sqlserver';
+    ```
+  </Tab>
+</Tabs>
+
+### @deepagents/retrieval
+
+Local-first RAG with embeddings and vector search.
+
+```bash
+npm install @deepagents/retrieval
+```
+
+**Built-in Dependencies:**
+- FastEmbed for local embeddings
+- SQLite-vec for vector storage
+- Multiple connectors (GitHub, RSS, PDF, etc.)
+
+### @deepagents/evals
+
+LLM evaluation framework with scoring and persistence.
+
+```bash
+npm install @deepagents/evals
+```
+
+**Includes:**
+- Dataset loading (JSON, JSONL, CSV)
+- Deterministic and LLM-based scorers
+- SQLite persistence
+- Console and file reporters
+
+### @deepagents/orchestrator
+
+High-level orchestration patterns for complex workflows.
+
+```bash
+npm install @deepagents/orchestrator
+```
+
+**Dependencies:**
+- `@deepagents/agent`
+- `@deepagents/context`
+- `@deepagents/retrieval`
+- `@deepagents/toolbox`
+
+### @deepagents/toolbox
+
+Pre-built tools for common tasks.
+
+```bash
+npm install @deepagents/toolbox
+```
+
+**Includes:**
+- DuckDuckGo search
+- Web scraping
+- Filesystem operations
+- HackerNews search
+- Weather data
+
+## Complete Installation
+
+For a full-featured setup with all packages:
+
+```bash
+npm install \
+  @deepagents/agent \
+  @deepagents/context \
+  @deepagents/text2sql \
+  @deepagents/retrieval \
+  @deepagents/evals \
+  @deepagents/orchestrator \
+  @deepagents/toolbox \
+  @ai-sdk/openai \
+  ai \
+  zod
+```
+
+## Environment Configuration
+
+### API Keys
+
+Set up environment variables for your model providers:
+
+```bash .env
+# OpenAI
+OPENAI_API_KEY=sk-...
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Google
+GOOGLE_GENERATIVE_AI_API_KEY=...
+
+# Groq
+GROQ_API_KEY=gsk_...
+
+# Database (if using text2sql)
+DATABASE_URL=postgresql://user:pass@localhost:5432/db
+```
+
+### TypeScript Configuration
+
+Recommended `tsconfig.json` settings:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  }
+}
+```
+
+<Note>
+DeepAgents uses Node.js native TypeScript execution. When importing files, always include the `.ts` extension:
+```typescript
+import { helper } from './utils.ts'; // ✅ Correct
+import { helper } from './utils';    // ❌ Wrong
+```
+</Note>
+
+## Package Versions
+
+All DeepAgents packages follow synchronized versioning:
+
+<CardGroup cols={3}>
+  <Card>
+    **@deepagents/agent**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/context**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/text2sql**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/retrieval**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/evals**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/orchestrator**
+    v0.23.0
+  </Card>
+  <Card>
+    **@deepagents/toolbox**
+    v0.23.0
+  </Card>
+</CardGroup>
+
+## Verification
+
+Verify your installation:
+
+```typescript verify.ts
+import { agent, execute } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+});
+
+const stream = execute(assistant, 'Say hello', {});
+console.log(await stream.text);
+```
+
+```bash
+node verify.ts
+```
+
+<Warning>
+Make sure your `OPENAI_API_KEY` (or other provider key) is set in your environment before running.
+</Warning>
+
+## Building from Source
+
+To build packages locally using the monorepo:
+
+```bash
+git clone https://github.com/JanuaryLabs/deepagents.git
+cd deepagents
+npm install
+```
+
+Build a specific package:
+
+```bash
+nx run agent:build
+nx run text2sql:build
+```
+
+Build all packages:
+
+```bash
+nx run-many --target=build --all
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+    Build your first agent in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="brain" href="/concepts/agents">
+    Learn about agent architecture
+  </Card>
+</CardGroup>

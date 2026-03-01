@@ -1,0 +1,513 @@
+---
+title: Context Variables
+description: Share state between agents and tools using type-safe context
+---
+
+Context variables allow you to share state across agents and tools in a type-safe way. Context flows through execution, enabling stateful multi-agent workflows.
+
+## Basic Context Usage
+
+Pass context as the third argument to execution functions:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  sessionId: string;
+}
+
+const assistant = agent<unknown, AppContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `You are assisting user ${ctx?.userId}.`,
+});
+
+const context: AppContext = {
+  userId: 'user123',
+  sessionId: 'session456',
+};
+
+const stream = await execute(assistant, 'Hello!', context);
+```
+
+## Type-Safe Context
+
+Define context types for type safety:
+
+```typescript
+interface UserContext {
+  userId: string;
+  userName: string;
+  email: string;
+  preferences: {
+    theme: 'light' | 'dark';
+    language: string;
+    notifications: boolean;
+  };
+}
+
+const personalizedAgent = agent<unknown, UserContext>({
+  name: 'personal_assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    You are a personal assistant for ${ctx?.userName}.
+    User preferences:
+    - Theme: ${ctx?.preferences.theme}
+    - Language: ${ctx?.preferences.language}
+    - Notifications: ${ctx?.preferences.notifications ? 'enabled' : 'disabled'}
+  `,
+});
+```
+
+## Accessing Context in Tools
+
+Use `toState()` to access context within tools:
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+import { toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  preferences: Record<string, string>;
+}
+
+const savePreferenceTool = tool({
+  description: 'Save user preference',
+  parameters: z.object({
+    key: z.string(),
+    value: z.string(),
+  }),
+  execute: async ({ key, value }, options) => {
+    const ctx = toState<AppContext>(options);
+    
+    // Read from context
+    console.log(`Saving preference for user: ${ctx.userId}`);
+    
+    // Mutate context (changes persist)
+    ctx.preferences[key] = value;
+    
+    return `Saved ${key}=${value}`;
+  },
+});
+
+const assistant = agent<unknown, AppContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `Help user ${ctx?.userId} manage their preferences.`,
+  tools: { savePreference: savePreferenceTool },
+});
+
+const context: AppContext = {
+  userId: 'user123',
+  preferences: {},
+};
+
+const stream = await execute(assistant, 'Set my theme to dark', context);
+await stream.text;
+
+console.log(context.preferences); // { theme: 'dark' }
+```
+
+## Complete Example from README
+
+From the source documentation:
+
+```typescript README.md:144:180
+import { openai } from '@ai-sdk/openai';
+import { tool } from 'ai';
+import { z } from 'zod';
+import { agent, execute, toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  preferences: Record<string, string>;
+}
+
+const preferenceTool = tool({
+  description: 'Save user preference',
+  parameters: z.object({
+    key: z.string(),
+    value: z.string(),
+  }),
+  execute: async ({ key, value }, options) => {
+    const ctx = toState<AppContext>(options);
+    ctx.preferences[key] = value;
+    return `Saved ${key}=${value}`;
+  },
+});
+
+const assistant = agent<unknown, AppContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `Help user ${ctx?.userId} manage their preferences.`,
+  tools: { savePreference: preferenceTool },
+});
+
+const context: AppContext = { 
+  userId: 'user123', 
+  preferences: {} 
+};
+
+const stream = execute(assistant, 'Set my theme to dark', context);
+await stream.text;
+
+console.log(context.preferences); // { theme: 'dark' }
+```
+
+## Context with Handoffs
+
+Context flows through all agents in a handoff chain:
+
+```typescript
+interface ProjectContext {
+  projectId: string;
+  budget: number;
+  timeline: {
+    start: Date;
+    end: Date;
+  };
+  resources: string[];
+}
+
+const budgetAgent = agent<unknown, ProjectContext>({
+  name: 'budget_analyst',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    Analyze budget for project ${ctx?.projectId}.
+    Available budget: $${ctx?.budget}
+  `,
+  handoffDescription: 'Analyzes project budget and costs',
+});
+
+const timelineAgent = agent<unknown, ProjectContext>({
+  name: 'timeline_planner',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    Create timeline for project ${ctx?.projectId}.
+    Start: ${ctx?.timeline.start.toISOString()}
+    End: ${ctx?.timeline.end.toISOString()}
+  `,
+  handoffDescription: 'Plans project timeline and milestones',
+});
+
+const coordinator = agent<unknown, ProjectContext>({
+  name: 'project_coordinator',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `
+    Coordinate project planning for project ${ctx?.projectId}.
+    Available resources: ${ctx?.resources.join(', ')}
+  `,
+  handoffs: [budgetAgent, timelineAgent],
+});
+
+const context: ProjectContext = {
+  projectId: 'proj-123',
+  budget: 100000,
+  timeline: {
+    start: new Date('2024-01-01'),
+    end: new Date('2024-12-31'),
+  },
+  resources: ['developer', 'designer', 'pm'],
+};
+
+const stream = swarm(coordinator, 'Plan this project', context);
+```
+
+## Mutable Context
+
+Context is mutable and changes persist:
+
+```typescript
+interface SessionContext {
+  sessionId: string;
+  messagesCount: number;
+  topics: string[];
+}
+
+const trackMessageTool = tool({
+  description: 'Track message statistics',
+  parameters: z.object({
+    topic: z.string(),
+  }),
+  execute: async ({ topic }, options) => {
+    const ctx = toState<SessionContext>(options);
+    
+    // Increment counter
+    ctx.messagesCount++;
+    
+    // Add topic if not present
+    if (!ctx.topics.includes(topic)) {
+      ctx.topics.push(topic);
+    }
+    
+    return `Tracked message #${ctx.messagesCount} about ${topic}`;
+  },
+});
+
+const context: SessionContext = {
+  sessionId: 'session-123',
+  messagesCount: 0,
+  topics: [],
+};
+
+const stream = await execute(assistant, 'Tell me about AI', context);
+await stream.text;
+
+console.log(context.messagesCount); // 1
+console.log(context.topics); // ['AI']
+```
+
+## Context Transformations
+
+Transform context between agents:
+
+```typescript
+interface InputContext {
+  userId: string;
+  rawData: string;
+}
+
+interface ProcessedContext {
+  userId: string;
+  processedData: {
+    entries: string[];
+    count: number;
+  };
+}
+
+const preprocessor = agent<unknown, InputContext, ProcessedContext>({
+  name: 'preprocessor',
+  model: openai('gpt-4o'),
+  prompt: 'Preprocess the raw data.',
+  prepareEnd: async ({ contextVariables }) => {
+    // Transform context
+    const processed: ProcessedContext = {
+      userId: contextVariables.userId,
+      processedData: {
+        entries: contextVariables.rawData.split(','),
+        count: contextVariables.rawData.split(',').length,
+      },
+    };
+    
+    // Update context
+    Object.assign(contextVariables, processed);
+  },
+});
+```
+
+## Advanced Context Patterns
+
+### Accumulator Pattern
+
+```typescript
+interface AccumulatorContext {
+  results: string[];
+}
+
+const collectTool = tool({
+  description: 'Collect a result',
+  parameters: z.object({
+    result: z.string(),
+  }),
+  execute: async ({ result }, options) => {
+    const ctx = toState<AccumulatorContext>(options);
+    ctx.results.push(result);
+    return `Collected result: ${result}`;
+  },
+});
+
+const collector = agent<unknown, AccumulatorContext>({
+  name: 'collector',
+  model: openai('gpt-4o'),
+  prompt: 'Collect multiple results using the collect tool.',
+  tools: { collect: collectTool },
+});
+
+const context: AccumulatorContext = { results: [] };
+
+const stream = await execute(
+  collector,
+  'Find and collect 5 interesting facts about TypeScript',
+  context
+);
+await stream.text;
+
+console.log(context.results); // ['fact1', 'fact2', ...]
+```
+
+### State Machine Pattern
+
+```typescript
+type State = 'idle' | 'processing' | 'complete' | 'error';
+
+interface StateMachineContext {
+  state: State;
+  data?: any;
+  error?: string;
+}
+
+const transitionTool = tool({
+  description: 'Transition to a new state',
+  parameters: z.object({
+    newState: z.enum(['idle', 'processing', 'complete', 'error']),
+    data: z.any().optional(),
+    error: z.string().optional(),
+  }),
+  execute: async ({ newState, data, error }, options) => {
+    const ctx = toState<StateMachineContext>(options);
+    ctx.state = newState;
+    if (data !== undefined) ctx.data = data;
+    if (error !== undefined) ctx.error = error;
+    return `Transitioned to ${newState}`;
+  },
+});
+
+const statefulAgent = agent<unknown, StateMachineContext>({
+  name: 'stateful_agent',
+  model: openai('gpt-4o'),
+  prompt: (ctx) => `Current state: ${ctx?.state}. Process the request.`,
+  tools: { transition: transitionTool },
+});
+
+const context: StateMachineContext = { state: 'idle' };
+```
+
+### Cache Pattern
+
+```typescript
+interface CacheContext {
+  cache: Map<string, any>;
+}
+
+const cacheLookupTool = tool({
+  description: 'Look up a value in the cache',
+  parameters: z.object({
+    key: z.string(),
+  }),
+  execute: async ({ key }, options) => {
+    const ctx = toState<CacheContext>(options);
+    const value = ctx.cache.get(key);
+    return value !== undefined
+      ? { found: true, value }
+      : { found: false };
+  },
+});
+
+const cacheSetTool = tool({
+  description: 'Store a value in the cache',
+  parameters: z.object({
+    key: z.string(),
+    value: z.any(),
+  }),
+  execute: async ({ key, value }, options) => {
+    const ctx = toState<CacheContext>(options);
+    ctx.cache.set(key, value);
+    return `Cached ${key}`;
+  },
+});
+
+const context: CacheContext = { cache: new Map() };
+```
+
+## Context Validation
+
+Validate context with Zod:
+
+```typescript
+import { z } from 'zod';
+
+const contextSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  age: z.number().int().min(0).max(120),
+});
+
+type ValidatedContext = z.infer<typeof contextSchema>;
+
+function validateContext(ctx: unknown): ValidatedContext {
+  return contextSchema.parse(ctx);
+}
+
+// Use validated context
+const context = validateContext({
+  userId: '123e4567-e89b-12d3-a456-426614174000',
+  email: 'user@example.com',
+  age: 30,
+});
+
+const stream = await execute(agent, 'Hello', context);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Define Clear Types">
+    Always define TypeScript types for your context:
+    
+    ```typescript
+    interface AppContext {
+      userId: string;
+      // ... other fields
+    }
+    
+    const agent = agent<unknown, AppContext>({ /* ... */ });
+    ```
+  </Accordion>
+  
+  <Accordion title="Initialize Context Properly">
+    Initialize all context fields before passing to agents:
+    
+    ```typescript
+    const context: AppContext = {
+      userId: 'user123',
+      preferences: {}, // Initialize empty objects
+      history: [],     // Initialize empty arrays
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Keep Context Minimal">
+    Only include data that needs to be shared across agents:
+    
+    ```typescript
+    // ✅ Good - minimal context
+    interface Context {
+      userId: string;
+      sessionId: string;
+    }
+    
+    // ❌ Avoid - too much data
+    interface Context {
+      userId: string;
+      allUserData: ComplexObject;
+      entireDatabase: any;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use toState() in Tools">
+    Always use `toState()` to access context in tools:
+    
+    ```typescript
+    execute: async (params, options) => {
+      const ctx = toState<AppContext>(options);
+      // Now use ctx...
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Streaming" icon="water" href="/agent/streaming">
+    Stream agent responses
+  </Card>
+  <Card title="API Reference" icon="book" href="/agent/api/agent">
+    Full API documentation
+  </Card>
+</CardGroup>

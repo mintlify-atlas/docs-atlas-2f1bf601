@@ -1,0 +1,383 @@
+---
+title: Scorers API
+description: API reference for all scorer functions and combinators
+---
+
+# Scorers API
+
+Scorers evaluate the quality of LLM outputs. All scorers implement the `Scorer` type.
+
+## Import
+
+```typescript
+import {
+  exactMatch,
+  includes,
+  regex,
+  levenshtein,
+  jsonMatch,
+  factuality,
+  all,
+  any,
+  weighted,
+} from '@deepagents/evals/scorers';
+```
+
+## Types
+
+### `Scorer`
+
+```typescript
+type Scorer = (args: ScorerArgs) => Promise<ScorerResult>;
+```
+
+### `ScorerArgs`
+
+```typescript
+interface ScorerArgs {
+  input: unknown;     // Original input from dataset
+  output: string;     // Model output to score
+  expected?: unknown; // Expected value from dataset
+}
+```
+
+### `ScorerResult`
+
+```typescript
+interface ScorerResult {
+  score: number;                      // 0..1 (0 = worst, 1 = best)
+  reason?: string;                    // Human-readable explanation
+  metadata?: Record<string, unknown>; // Additional scoring metadata
+}
+```
+
+## Deterministic Scorers
+
+### `exactMatch`
+
+Strict string equality:
+
+```typescript
+const result = await exactMatch({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if `output === String(expected)`
+- `0.0` otherwise, with a `reason` explaining the mismatch
+
+### `includes`
+
+Substring check:
+
+```typescript
+const result = await includes({
+  input: 'What is the capital of France?',
+  output: 'The capital of France is Paris.',
+  expected: 'Paris',
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if `output.includes(String(expected))`
+- `0.0` otherwise
+
+### `regex(pattern)`
+
+Regular expression test:
+
+```typescript
+const emailScorer = regex(/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i);
+
+const result = await emailScorer({
+  input: 'Extract the email',
+  output: 'user@example.com',
+});
+// { score: 1.0 }
+```
+
+**Signature:**
+
+```typescript
+function regex(pattern: RegExp): Scorer;
+```
+
+**Returns:**
+
+- `1.0` if `pattern.test(output)`
+- `0.0` otherwise
+
+### `levenshtein`
+
+Normalized edit distance similarity:
+
+```typescript
+const result = await levenshtein({
+  input: 'Spell "hello"',
+  output: 'helo',
+  expected: 'hello',
+});
+// { score: 0.8, reason: '...', metadata: { ... } }
+```
+
+**Returns:**
+
+- `1.0` for exact match
+- `0.0` for completely different strings
+- Decimal between 0 and 1 for partial similarity
+- Includes `reason` and `metadata` from [autoevals](https://github.com/braintrustdata/autoevals)
+
+### `jsonMatch`
+
+Deep structural equality for JSON:
+
+```typescript
+const result = await jsonMatch({
+  input: 'Generate JSON',
+  output: '{"name":"Alice","age":30}',
+  expected: { name: 'Alice', age: 30 },
+});
+// { score: 1.0 }
+```
+
+**Returns:**
+
+- `1.0` if JSON structures are deeply equal
+- `0.0` if structures differ or JSON is invalid
+
+**Notes:**
+
+- Object key order doesn't matter
+- Array order matters
+- `expected` can be a string or an object
+
+## LLM-Based Scorers
+
+### `factuality(config)`
+
+Checks if output is factually correct:
+
+```typescript
+const factScorer = factuality({ model: 'gpt-4o-mini' });
+
+const result = await factScorer({
+  input: 'What is the capital of France?',
+  output: 'Paris is the capital and largest city of France.',
+  expected: 'Paris',
+});
+// { score: 1.0, reason: 'Output is factually correct', metadata: { ... } }
+```
+
+**Signature:**
+
+```typescript
+function factuality(config: { model: string }): Scorer;
+```
+
+**Config:**
+
+```typescript
+{
+  model: string; // OpenAI-compatible model ID (e.g., 'gpt-4o-mini')
+}
+```
+
+**Returns:**
+
+- `1.0` if output is factually consistent with expected
+- `0.0` if output contradicts expected
+- Decimal between 0 and 1 for partial correctness
+- `reason` field contains LLM's explanation
+- `metadata` includes additional details from autoevals
+
+**Requirements:**
+
+- `OPENAI_API_KEY` environment variable
+- OpenAI-compatible API endpoint
+
+## Combinators
+
+### `all(...scorers)`
+
+**Weakest-link (minimum score):**
+
+```typescript
+const strict = all(exactMatch, includes);
+
+const result = await strict({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0 } (both scorers passed)
+```
+
+**Signature:**
+
+```typescript
+function all(...scorers: Scorer[]): Scorer;
+```
+
+**Returns:**
+
+- `score`: Minimum score of all scorers
+- `reason`: Concatenated reasons from all scorers (semicolon-separated)
+
+### `any(...scorers)`
+
+**Best-of (maximum score):**
+
+```typescript
+const lenient = any(exactMatch, includes);
+
+const result = await lenient({
+  input: 'What is the capital of France?',
+  output: 'The capital is Paris.',
+  expected: 'Paris',
+});
+// { score: 1.0 } (includes passed, even though exactMatch failed)
+```
+
+**Signature:**
+
+```typescript
+function any(...scorers: Scorer[]): Scorer;
+```
+
+**Returns:**
+
+- `score`: Maximum score of all scorers
+- `reason`: Reason from the highest-scoring scorer
+
+### `weighted(config)`
+
+**Weighted average:**
+
+```typescript
+const balanced = weighted({
+  accuracy: { scorer: exactMatch, weight: 2 },
+  grounding: { scorer: factuality({ model: 'gpt-4o-mini' }), weight: 1 },
+});
+
+const result = await balanced({
+  input: 'What is 2+2?',
+  output: '4',
+  expected: '4',
+});
+// { score: 1.0, reason: 'accuracy: 1.00 (w=2), grounding: 1.00 (w=1)' }
+```
+
+**Signature:**
+
+```typescript
+function weighted(
+  config: Record<string, { scorer: Scorer; weight: number }>
+): Scorer;
+```
+
+**Config:**
+
+```typescript
+{
+  [name: string]: {
+    scorer: Scorer;
+    weight: number;
+  }
+}
+```
+
+**Returns:**
+
+- `score`: Weighted average `sum(score * weight) / sum(weight)`
+- `reason`: Lists all scorer scores and weights
+
+## Custom Scorers
+
+Create custom scorers by implementing the `Scorer` type:
+
+```typescript
+import type { Scorer } from '@deepagents/evals/scorers';
+
+const lengthScorer: Scorer = async ({ output }) => {
+  const score = output.length > 10 ? 1.0 : 0.5;
+  return {
+    score,
+    reason: `Output length: ${output.length}`,
+  };
+};
+```
+
+**Requirements:**
+
+- Return a `Promise<ScorerResult>`
+- Score must be between 0 and 1
+- Optionally include `reason` and `metadata`
+
+## Examples
+
+### Using Multiple Scorers
+
+```typescript
+import { evaluate, exactMatch, includes } from '@deepagents/evals';
+
+await evaluate({
+  // ...
+  scorers: {
+    exact: exactMatch,
+    contains: includes,
+  },
+});
+```
+
+A case passes if **all** scorers return `>= threshold`.
+
+### Combining Scorers
+
+```typescript
+import { all, any, weighted, exactMatch, includes, factuality } from '@deepagents/evals/scorers';
+
+// All must pass
+const strict = all(exactMatch, includes);
+
+// At least one must pass
+const lenient = any(exactMatch, includes);
+
+// Weighted combination
+const balanced = weighted({
+  accuracy: { scorer: exactMatch, weight: 2 },
+  grounding: { scorer: factuality({ model: 'gpt-4o-mini' }), weight: 1 },
+});
+```
+
+### Custom Scorer
+
+```typescript
+import type { Scorer } from '@deepagents/evals/scorers';
+
+const containsKeyword: Scorer = async ({ output }) => {
+  const keywords = ['paris', 'france', 'capital'];
+  const matches = keywords.filter((k) => output.toLowerCase().includes(k));
+  return {
+    score: matches.length / keywords.length,
+    reason: `Matched ${matches.length}/${keywords.length} keywords`,
+  };
+};
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Evaluate API" icon="code" href="/evals/api/evaluate">
+    Learn about the evaluate() function
+  </Card>
+  <Card title="Scorers Guide" icon="star" href="/evals/scorers">
+    Scorer usage guide
+  </Card>
+</CardGroup>

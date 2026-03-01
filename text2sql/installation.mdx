@@ -1,0 +1,230 @@
+---
+title: Installation
+description: Install @deepagents/text2sql and database adapters
+---
+
+# Installation
+
+Install the Text2SQL package and your database-specific adapter.
+
+## Requirements
+
+- **Node.js** - LTS version (20+)
+- **TypeScript** - 5.0+ (recommended)
+- **Database client** - Depends on your database (see below)
+
+## Core Package
+
+Install the main Text2SQL package:
+
+```bash
+npm install @deepagents/text2sql
+```
+
+This includes:
+- Core Text2SQL engine
+- Context management system
+- All database adapters (SQLite, PostgreSQL, SQL Server, MySQL, BigQuery)
+- Synthesis tools for training data generation
+
+## Database-Specific Setup
+
+Depending on your database, you'll need additional peer dependencies.
+
+### PostgreSQL
+
+Install the `pg` client:
+
+```bash
+npm install pg
+npm install -D @types/pg
+```
+
+Import from the PostgreSQL adapter:
+
+```typescript
+import { Postgres, tables, views, info } from '@deepagents/text2sql/postgres';
+```
+
+### SQLite
+
+SQLite requires no additional dependencies. Use Node.js native `sqlite3` or `better-sqlite3`:
+
+```bash
+npm install better-sqlite3
+npm install -D @types/better-sqlite3
+```
+
+Import from the SQLite adapter:
+
+```typescript
+import { Sqlite, tables, views, info } from '@deepagents/text2sql/sqlite';
+```
+
+### SQL Server
+
+Install the `mssql` client:
+
+```bash
+npm install mssql
+```
+
+Import from the SQL Server adapter:
+
+```typescript
+import { SqlServer, tables, views, info } from '@deepagents/text2sql/sqlserver';
+```
+
+### MySQL / MariaDB
+
+Install the `mysql2` client:
+
+```bash
+npm install mysql2
+```
+
+Import from the MySQL adapter:
+
+```typescript
+import { Mysql, Mariadb, tables, views } from '@deepagents/text2sql/mysql';
+```
+
+### BigQuery
+
+BigQuery support is included in the package:
+
+```bash
+# No additional installation needed
+```
+
+Import from the BigQuery adapter:
+
+```typescript
+import { BigQuery, tables, views, info } from '@deepagents/text2sql/bigquery';
+```
+
+## AI Model Provider
+
+Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs).
+
+Install your preferred provider:
+
+### OpenAI
+
+```bash
+npm install @ai-sdk/openai
+```
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+
+const text2sql = new Text2Sql({
+  model: openai('gpt-4o'),
+  // ...
+});
+```
+
+### Anthropic
+
+```bash
+npm install @ai-sdk/anthropic
+```
+
+```typescript
+import { anthropic } from '@ai-sdk/anthropic';
+
+const text2sql = new Text2Sql({
+  model: anthropic('claude-3-5-sonnet-20241022'),
+  // ...
+});
+```
+
+### Groq
+
+```bash
+npm install @ai-sdk/groq
+```
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+
+const text2sql = new Text2Sql({
+  model: groq('llama-3.3-70b-versatile'),
+  // ...
+});
+```
+
+### Google Generative AI
+
+```bash
+npm install @ai-sdk/google
+```
+
+```typescript
+import { google } from '@ai-sdk/google';
+
+const text2sql = new Text2Sql({
+  model: google('gemini-2.0-flash-exp'),
+  // ...
+});
+```
+
+## Context Store
+
+Install the context management package:
+
+```bash
+npm install @deepagents/context
+```
+
+This provides:
+- Context engine for schema and conversation management
+- Fragment types (term, hint, guardrail, etc.)
+- Storage adapters (in-memory, SQLite)
+
+```typescript
+import { InMemoryContextStore, SqliteContextStore } from '@deepagents/context';
+
+// In-memory (for development)
+const store = new InMemoryContextStore();
+
+// SQLite (for production)
+const store = new SqliteContextStore({ path: './context.db' });
+```
+
+## Verify Installation
+
+Create a simple test file to verify everything is installed correctly:
+
+```typescript test.ts
+import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
+import { Text2Sql } from '@deepagents/text2sql';
+import { openai } from '@ai-sdk/openai';
+import Database from 'better-sqlite3';
+
+const db = new Database(':memory:');
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [tables()]
+});
+
+console.log('Text2SQL installed successfully!');
+```
+
+Run it:
+
+```bash
+node test.ts
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Getting Started" icon="rocket" href="/text2sql/getting-started">
+    Write your first natural language query
+  </Card>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Configure your database adapter
+  </Card>
+</CardGroup>

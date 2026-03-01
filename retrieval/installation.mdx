@@ -1,0 +1,208 @@
+---
+title: 'Installation'
+description: 'Install and set up @deepagents/retrieval'
+---
+
+# Installation
+
+Get started with the DeepAgents retrieval package for RAG and semantic search.
+
+## Package Installation
+
+Install the core package:
+
+```bash
+npm install @deepagents/retrieval
+```
+
+## Dependencies
+
+The package includes these key dependencies:
+
+- **fastembed** - Local embedding generation
+- **sqlite-vec** - Vector similarity search in SQLite
+- **langchain** - Text splitting utilities
+- **unpdf** - PDF text extraction
+- **rss-parser** - RSS feed parsing
+- **@linear/sdk** - Linear API client
+
+All dependencies are automatically installed with the package.
+
+## Database Setup
+
+The retrieval system requires a SQLite database. You can use either:
+
+### Better SQLite3 (Recommended)
+
+```bash
+npm install better-sqlite3
+```
+
+```typescript
+import Database from 'better-sqlite3';
+import { SqliteStore } from '@deepagents/retrieval';
+
+const db = new Database('./my-vectors.db');
+const store = new SqliteStore(db, 384); // 384 dimensions for BGE-Small-EN-V15
+```
+
+### In-Memory Database
+
+For development or testing:
+
+```typescript
+import Database from 'better-sqlite3';
+import { SqliteStore } from '@deepagents/retrieval';
+
+const db = new Database(':memory:');
+const store = new SqliteStore(db, 384);
+```
+
+## Embedding Model Setup
+
+FastEmbed downloads models automatically on first use. Models are cached locally.
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+// Default: BGE-Small-EN-V15 (384 dimensions)
+const embedder = fastembed();
+
+// Or specify a model explicitly
+const embedder = fastembed({
+  model: 'BGESmallENV15',
+  cacheDir: './models', // Optional: custom cache directory
+});
+```
+
+### Available Models
+
+- **BGESmallENV15** (384 dimensions) - Fast, good quality
+- **BGEBaseENV15** (768 dimensions) - Higher quality, slower
+- **AllMiniLML6V2** (384 dimensions) - Alternative lightweight model
+- **MLE5Large** (1024 dimensions) - Best quality, largest
+
+## Basic Setup Example
+
+Complete setup with all components:
+
+```typescript
+import Database from 'better-sqlite3';
+import { fastembed, SqliteStore, ingest } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// 1. Create database
+const db = new Database('./vectors.db');
+
+// 2. Initialize store (384 dimensions for BGESmallENV15)
+const store = new SqliteStore(db, 384);
+
+// 3. Create embedder
+const embedder = fastembed({
+  model: 'BGESmallENV15',
+});
+
+// 4. Ingest content
+await ingest({
+  connector: local('**/*.md'),
+  store,
+  embedder,
+});
+
+console.log('Ingestion complete!');
+```
+
+## TypeScript Configuration
+
+Ensure your `tsconfig.json` includes:
+
+```json
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "esModuleInterop": true
+  }
+}
+```
+
+## Connector Imports
+
+Connectors are available from a separate export path:
+
+```typescript
+// Core exports
+import { ingest, similaritySearch, fastembed, SqliteStore } from '@deepagents/retrieval';
+
+// Connector exports
+import { github, rss, local, pdf, linear } from '@deepagents/retrieval/connectors';
+```
+
+## Verify Installation
+
+Test your setup with a quick example:
+
+```typescript
+import Database from 'better-sqlite3';
+import { fastembed, SqliteStore, ingest, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const db = new Database(':memory:');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Create a test file connector
+const connector = local('README.md');
+
+// Ingest
+await ingest({ connector, store, embedder });
+
+// Search
+const results = await similaritySearch('installation', {
+  connector,
+  store,
+  embedder,
+});
+
+console.log(`Found ${results.length} results`);
+console.log(results[0]);
+```
+
+## Troubleshooting
+
+### Model Download Issues
+
+If FastEmbed fails to download models:
+
+```typescript
+// Specify a custom cache directory
+const embedder = fastembed({
+  cacheDir: '/path/to/models',
+});
+```
+
+### SQLite Version
+
+Ensure you're using a recent version of better-sqlite3 that supports the sqlite-vec extension.
+
+### Memory Usage
+
+For large ingestion jobs, use batching:
+
+```typescript
+// Ingestion automatically batches in groups of 40
+await ingest({ connector, store, embedder });
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn how to ingest documents
+  </Card>
+  <Card title="Connectors" icon="plug" href="/retrieval/connectors">
+    Explore available connectors
+  </Card>
+</CardGroup>

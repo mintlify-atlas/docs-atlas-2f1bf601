@@ -1,0 +1,453 @@
+---
+title: 'Local Files Connector'
+description: 'Ingest local files using glob patterns'
+---
+
+# Local Files Connector
+
+The local files connector ingests files from your local filesystem using glob patterns, with automatic gitignore support.
+
+## Import
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+// Ingest all markdown files
+await ingest({
+  connector: local('**/*.md'),
+  store,
+  embedder,
+});
+```
+
+## Configuration
+
+```typescript
+function local(
+  pattern: string,
+  options?: {
+    ingestWhen?: 'never' | 'contentChanged' | 'expired';
+    expiresAfter?: number;
+    cwd?: string;
+  }
+): Connector
+```
+
+### Pattern
+
+Glob pattern to match files:
+
+```typescript
+const connector = local('**/*.md'); // All markdown files
+```
+
+### Current Working Directory
+
+Base directory for the glob pattern:
+
+```typescript
+const connector = local('**/*.ts', {
+  cwd: './src', // Search in ./src
+});
+```
+
+Default is `process.cwd()`.
+
+### Ingestion Strategy
+
+Control when to ingest:
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged', // Re-ingest on changes (default)
+});
+```
+
+Options:
+- `contentChanged` - Always ingest, skip unchanged files
+- `never` - Only ingest if source doesn't exist
+- `expired` - Only ingest if expired
+
+### Expiry
+
+Set content expiration:
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+});
+```
+
+## Glob Patterns
+
+### All Files of Type
+
+```typescript
+local('**/*.md')     // All markdown files
+local('**/*.ts')     // All TypeScript files
+local('**/*.json')   // All JSON files
+```
+
+### Specific Directory
+
+```typescript
+local('docs/**/*.md')       // Markdown in docs/
+local('src/**/*.ts')        // TypeScript in src/
+local('config/**/*.json')   // JSON in config/
+```
+
+### Multiple Extensions
+
+Use brace expansion:
+
+```typescript
+local('**/*.{md,mdx}')      // Markdown and MDX
+local('**/*.{ts,tsx}')      // TypeScript and TSX
+local('**/*.{js,jsx}')      // JavaScript and JSX
+```
+
+### Specific Files
+
+```typescript
+local('README.md')          // Single file
+local('docs/guide.md')      // Specific path
+```
+
+### Excluding Patterns
+
+Use negation (handled by gitignore):
+
+```typescript
+// Files are automatically filtered by .gitignore
+local('**/*.ts') // Excludes node_modules, dist, etc.
+```
+
+## Gitignore Support
+
+The connector automatically respects `.gitignore` files:
+
+### How It Works
+
+1. **Collect Patterns** - Read all `.gitignore` files from root to target
+2. **Filter Files** - Exclude files matching gitignore patterns
+3. **Cache Patterns** - Cache for performance
+
+### Example
+
+Given `.gitignore`:
+
+```
+node_modules
+dist
+*.log
+```
+
+This pattern:
+
+```typescript
+local('**/*')
+```
+
+Automatically excludes:
+- `node_modules/**`
+- `dist/**`
+- `*.log`
+
+### Additional Exclusions
+
+These are always excluded:
+
+- `**/node_modules/**`
+- `**/.git/**`
+- `**/.DS_Store`
+- `**/Thumbs.db`
+- `**/*.tmp`
+- `**/*.temp`
+- `**/coverage/**`
+- `**/dist/**`
+- `**/build/**`
+
+## Source ID
+
+```typescript
+const connector = local('**/*.md');
+console.log(connector.sourceId);
+// "glob:**/*.md"
+```
+
+Source ID format: `glob:{pattern}`
+
+## Document IDs
+
+Document IDs are absolute file paths:
+
+```typescript
+for await (const doc of connector.sources()) {
+  console.log(doc.id);
+  // "/Users/you/project/docs/guide.md"
+  // "/Users/you/project/README.md"
+}
+```
+
+## Examples
+
+### Ingest Documentation
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('docs/**/*.md');
+
+await ingest({ connector, store, embedder });
+```
+
+### Ingest Source Code
+
+```typescript
+const connector = local('src/**/*.{ts,tsx}', {
+  cwd: process.cwd(),
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### Multiple Patterns
+
+Ingest from multiple patterns:
+
+```typescript
+const patterns = [
+  local('docs/**/*.md'),
+  local('src/**/*.ts'),
+  local('README.md'),
+];
+
+for (const connector of patterns) {
+  await ingest({ connector, store, embedder });
+}
+```
+
+### Search Documentation
+
+```typescript
+import { similaritySearch } from '@deepagents/retrieval';
+
+const connector = local('docs/**/*.md');
+
+const results = await similaritySearch(
+  'How do I install the package?',
+  { connector, store, embedder }
+);
+
+console.log(results[0].content);
+```
+
+### One-Time Ingestion
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'never', // Only ingest once
+});
+
+await ingest({ connector, store, embedder });
+```
+
+### Time-Based Re-ingestion
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 7 * 24 * 60 * 60 * 1000, // 7 days
+});
+
+await ingest({ connector, store, embedder });
+```
+
+## Performance
+
+### File Filtering
+
+Files are filtered efficiently:
+
+1. **Fast-glob** - Fast file matching
+2. **Gitignore Cache** - Cached pattern matching
+3. **Directory Grouping** - Optimize gitignore reads
+
+### Large Directories
+
+For large codebases, use specific patterns:
+
+```typescript
+// Good: Specific pattern
+local('src/**/*.ts')
+
+// Less efficient: Very broad pattern
+local('**/*')
+```
+
+## Error Handling
+
+### File Read Errors
+
+Empty string fallback for read errors:
+
+```typescript
+content: () => readFile(path, 'utf8').catch(() => '')
+```
+
+Files that can't be read are skipped.
+
+### No Files Found
+
+```typescript
+const connector = local('nonexistent/**/*.md');
+await ingest({ connector, store, embedder });
+// Completes without error, no files ingested
+```
+
+### Pattern Errors
+
+```typescript
+try {
+  const connector = local('**/*.md');
+  await ingest({ connector, store, embedder });
+} catch (error) {
+  console.error('Ingestion failed:', error);
+}
+```
+
+## Working Directory
+
+The `cwd` option sets the base directory:
+
+```typescript
+// Search in ./docs
+const connector = local('**/*.md', {
+  cwd: './docs',
+});
+
+// Equivalent to:
+const connector2 = local('docs/**/*.md', {
+  cwd: process.cwd(),
+});
+```
+
+## Symbolic Links
+
+Symbolic links are not followed:
+
+```typescript
+// fast-glob configuration
+{
+  followSymbolicLinks: false
+}
+```
+
+This prevents infinite loops and duplicate content.
+
+## Hidden Files
+
+Dot files are excluded by default:
+
+```typescript
+// fast-glob configuration
+{
+  dot: false
+}
+```
+
+To include hidden files, you would need to modify the connector.
+
+## Change Detection
+
+Files are automatically compared using content hashing:
+
+```typescript
+import { cid } from '@deepagents/retrieval';
+
+const contentId = cid(fileContent); // SHA-256 hash
+```
+
+Unchanged files are skipped during re-ingestion.
+
+## Best Practices
+
+**Use Specific Patterns**
+
+Be specific to reduce file scanning:
+
+```typescript
+// Good
+local('docs/**/*.md')
+
+// Less efficient
+local('**/*')
+```
+
+**Leverage Gitignore**
+
+Add patterns to `.gitignore` to exclude files:
+
+```
+# .gitignore
+node_modules
+build
+dist
+*.log
+```
+
+**Set Working Directory**
+
+Use `cwd` for cleaner patterns:
+
+```typescript
+local('**/*.md', { cwd: './docs' })
+```
+
+**Use Appropriate Strategies**
+
+Choose ingestion strategy based on use case:
+- Static content: `ingestWhen: 'never'`
+- Dynamic content: `ingestWhen: 'contentChanged'`
+- Time-sensitive: `ingestWhen: 'expired'`
+
+**Handle Empty Results**
+
+Check if files were found:
+
+```typescript
+const connector = local('**/*.md');
+await ingest({ connector, store, embedder });
+
+const exists = await store.sourceExists(connector.sourceId);
+if (!exists) {
+  console.log('No files found matching pattern');
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="PDF Connector" icon="file-pdf" href="/retrieval/connectors/pdf">
+    Ingest PDF documents
+  </Card>
+  <Card title="GitHub Connector" icon="github" href="/retrieval/connectors/github">
+    Ingest from GitHub
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Search ingested files
+  </Card>
+</CardGroup>

@@ -1,0 +1,337 @@
+---
+title: 'Connectors Overview'
+description: 'Connect to various data sources for ingestion'
+---
+
+# Connectors
+
+Connectors provide a unified interface for ingesting content from different sources. Each connector implements the `Connector` interface and handles source-specific details.
+
+## Available Connectors
+
+<CardGroup cols={2}>
+  <Card title="GitHub" icon="github" href="/retrieval/connectors/github">
+    GitHub files, releases, and repositories
+  </Card>
+  <Card title="RSS Feeds" icon="rss" href="/retrieval/connectors/rss">
+    RSS/Atom feeds with article extraction
+  </Card>
+  <Card title="Local Files" icon="folder" href="/retrieval/connectors/files">
+    Local files with glob patterns
+  </Card>
+  <Card title="PDF Documents" icon="file-pdf" href="/retrieval/connectors/pdf">
+    PDF files and documents
+  </Card>
+  <Card title="Linear Issues" icon="linear" href="/retrieval/connectors/linear">
+    Linear workspace issues
+  </Card>
+</CardGroup>
+
+## Connector Interface
+
+All connectors implement this interface:
+
+```typescript
+export type Connector = {
+  /** Unique identifier for the source */
+  sourceId: string;
+  
+  /** Async generator yielding documents */
+  sources: () => AsyncGenerator<{
+    id: string;
+    content: () => Promise<string>;
+    metadata?: Record<string, unknown>;
+  }>;
+  
+  /** Ingestion strategy */
+  ingestWhen?: 'never' | 'contentChanged' | 'expired';
+  
+  /** Expiry duration in milliseconds */
+  expiresAfter?: number;
+};
+```
+
+### Source ID
+
+Each connector has a unique `sourceId` that identifies the content source:
+
+```typescript
+const connector = github.file('facebook/react/README.md');
+console.log(connector.sourceId);
+// "github:file:facebook/react/README.md"
+```
+
+Source IDs are used to:
+- Track which content has been ingested
+- Avoid duplicate ingestion
+- Query specific sources during search
+
+### Document Generator
+
+The `sources()` method returns an async generator that yields documents:
+
+```typescript
+for await (const doc of connector.sources()) {
+  console.log(doc.id);           // Document identifier
+  const text = await doc.content(); // Document content
+  console.log(doc.metadata);     // Optional metadata
+}
+```
+
+Each document includes:
+- `id` - Unique document identifier
+- `content` - Function returning document text
+- `metadata` - Optional key-value metadata
+
+### Ingestion Strategy
+
+Connectors can specify when to ingest:
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged', // Default
+});
+```
+
+**contentChanged** (default)
+
+Always attempt ingestion. Skip unchanged documents via content hashing.
+
+**never**
+
+Only ingest if the source has never been ingested.
+
+**expired**
+
+Only ingest if the source doesn't exist or has expired.
+
+### Expiry
+
+Set expiration time for cached content:
+
+```typescript
+const connector = rss('https://example.com/feed', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours
+});
+```
+
+## Using Connectors
+
+### Import Connectors
+
+```typescript
+import { github, rss, local, pdf, linear } from '@deepagents/retrieval/connectors';
+```
+
+### With Ingestion
+
+```typescript
+import { ingest, fastembed, SqliteStore } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+const db = new Database('./vectors.db');
+const store = new SqliteStore(db, 384);
+const embedder = fastembed();
+
+await ingest({
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+```
+
+### With Search
+
+```typescript
+import { similaritySearch } from '@deepagents/retrieval';
+
+const results = await similaritySearch('How do I install React?', {
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+```
+
+## Connector Examples
+
+### GitHub File
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+
+const connector = github.file('microsoft/TypeScript/README.md');
+```
+
+### GitHub Releases
+
+```typescript
+const connector = github.release('facebook/react', {
+  untilTag: 'v18.0.0',
+  inclusive: true,
+});
+```
+
+### GitHub Repository
+
+```typescript
+const connector = github.repo('https://github.com/vercel/next.js', {
+  includes: ['**/*.md'],
+  excludes: ['**/node_modules/**'],
+  branch: 'canary',
+});
+```
+
+### RSS Feed
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+
+const connector = rss('https://hnrss.org/frontpage', {
+  maxItems: 10,
+  fetchFullArticles: true,
+});
+```
+
+### Local Files
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('docs/**/*.md', {
+  ingestWhen: 'contentChanged',
+  cwd: process.cwd(),
+});
+```
+
+### PDF Files
+
+```typescript
+import { pdf, pdfFile } from '@deepagents/retrieval/connectors';
+
+// Glob pattern
+const connector1 = pdf('research/**/*.pdf');
+
+// Single file
+const connector2 = pdfFile('./manual.pdf');
+
+// From URL
+const connector3 = pdfFile('https://example.com/paper.pdf');
+```
+
+### Linear Issues
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+
+const connector = linear('your-api-key');
+```
+
+## Custom Connectors
+
+Create your own connector by implementing the interface:
+
+```typescript
+import type { Connector } from '@deepagents/retrieval/connectors';
+
+export function customConnector(url: string): Connector {
+  return {
+    sourceId: `custom:${url}`,
+    
+    sources: async function* () {
+      // Fetch your data
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      // Yield documents
+      for (const item of data.items) {
+        yield {
+          id: item.id,
+          content: async () => item.text,
+          metadata: { author: item.author },
+        };
+      }
+    },
+    
+    ingestWhen: 'contentChanged',
+  };
+}
+```
+
+### Using Custom Connectors
+
+```typescript
+import { ingest } from '@deepagents/retrieval';
+
+await ingest({
+  connector: customConnector('https://api.example.com/data'),
+  store,
+  embedder,
+});
+```
+
+## Multiple Connectors
+
+Ingest from multiple sources:
+
+```typescript
+const connectors = [
+  github.file('facebook/react/README.md'),
+  local('docs/**/*.md'),
+  rss('https://blog.example.com/feed'),
+];
+
+for (const connector of connectors) {
+  await ingest({ connector, store, embedder });
+}
+```
+
+Each connector maintains its own `sourceId` for independent tracking.
+
+## Best Practices
+
+**Use Descriptive Source IDs**
+
+Source IDs should clearly identify the content source.
+
+**Handle Errors in Content Functions**
+
+The `content()` function should handle errors gracefully:
+
+```typescript
+content: () => readFile(path, 'utf8').catch(() => '')
+```
+
+**Include Useful Metadata**
+
+Add metadata that helps with filtering or context:
+
+```typescript
+metadata: {
+  author: 'John Doe',
+  date: '2024-01-01',
+  category: 'tutorial',
+}
+```
+
+**Choose Appropriate Ingestion Strategies**
+
+Use `never` for static content, `contentChanged` for dynamic content, and `expired` for time-sensitive content.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub Connector" icon="github" href="/retrieval/connectors/github">
+    Detailed GitHub connector guide
+  </Card>
+  <Card title="RSS Connector" icon="rss" href="/retrieval/connectors/rss">
+    RSS feed ingestion
+  </Card>
+  <Card title="Local Files" icon="folder" href="/retrieval/connectors/files">
+    Work with local files
+  </Card>
+  <Card title="API Reference" icon="code" href="/retrieval/api/connectors">
+    Connector API documentation
+  </Card>
+</CardGroup>

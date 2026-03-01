@@ -1,0 +1,463 @@
+---
+title: SQLite Adapter
+description: Setup and configuration for SQLite databases
+---
+
+# SQLite Adapter
+
+The SQLite adapter provides lightweight embedded database support for Text2SQL. Perfect for local development, testing, and single-file databases.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+npm install better-sqlite3
+npm install -D @types/better-sqlite3
+```
+
+## Basic Usage
+
+```typescript
+import { Sqlite, tables, views, info } from '@deepagents/text2sql/sqlite';
+import Database from 'better-sqlite3';
+
+const db = new Database('./my-database.db');
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [
+    tables(),
+    views(),
+    info()
+  ]
+});
+```
+
+## Configuration Options
+
+```typescript
+interface SqliteAdapterOptions {
+  // Required: Function to execute SQL queries
+  execute: (sql: string) => any[] | Promise<any[]>;
+  
+  // Optional: Custom validation function
+  validate?: (sql: string) => string | void | Promise<string | void>;
+  
+  // Required: Grounding functions for schema introspection
+  grounding: GroundingFn[];
+}
+```
+
+### Execute Function
+
+The `execute` function receives SQL and returns query results.
+
+#### Using better-sqlite3
+
+```typescript
+import Database from 'better-sqlite3';
+
+const db = new Database('./database.db');
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [tables()]
+});
+```
+
+#### Using node-sqlite3
+
+```typescript
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
+
+const db = await open({
+  filename: './database.db',
+  driver: sqlite3.Database
+});
+
+const adapter = new Sqlite({
+  execute: async (sql) => {
+    return await db.all(sql);
+  },
+  grounding: [tables()]
+});
+```
+
+### Custom Validation
+
+By default, validation uses `EXPLAIN` to check SQL syntax. You can provide a custom validator:
+
+```typescript
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  validate: async (sql) => {
+    // Custom validation logic
+    if (sql.includes('DROP')) {
+      throw new Error('DROP statements not allowed');
+    }
+    
+    // Use EXPLAIN for syntax check
+    try {
+      db.prepare(`EXPLAIN ${sql}`).all();
+    } catch (error) {
+      throw error;
+    }
+  },
+  grounding: [tables()]
+});
+```
+
+## Grounding Functions
+
+All SQLite grounding functions are available:
+
+```typescript
+import {
+  tables,        // Tables, columns, and primary keys
+  views,         // Database views
+  info,          // SQLite version and metadata
+  indexes,       // Index information
+  constraints,   // UNIQUE, CHECK, FOREIGN KEY constraints
+  rowCount,      // Table row counts and size hints
+  columnStats,   // Min/max/null distribution
+  columnValues   // Distinct values for low-cardinality columns
+} from '@deepagents/text2sql/sqlite';
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints(),
+    rowCount(),
+    columnStats(),
+    columnValues({ limit: 20 })
+  ]
+});
+```
+
+## SQLite-Specific Features
+
+### No Schema Support
+
+SQLite does not have separate schemas. All tables are in a single namespace:
+
+```typescript
+// No schema prefix needed
+const sql = 'SELECT * FROM customers';
+```
+
+### Identifier Quoting
+
+SQLite uses double quotes for identifiers:
+
+```typescript
+adapter.quoteIdentifier('my_table');  // "my_table"
+adapter.quoteIdentifier('my column'); // "my column"
+```
+
+### String Escaping
+
+SQLite escapes single quotes by doubling them:
+
+```typescript
+adapter.escape("O'Reilly");  // O''Reilly
+```
+
+### LIMIT Clause
+
+SQLite uses LIMIT for row limits:
+
+```typescript
+SELECT * FROM customers LIMIT 10
+```
+
+## Error Handling
+
+SQLite errors are automatically classified:
+
+```typescript
+try {
+  const sql = await text2sql.toSql('Show me invalid_table');
+} catch (error) {
+  console.error(error);
+}
+```
+
+Error types:
+
+| Error Pattern | Type | Suggestion |
+|---------------|------|------------|
+| `no such table: X` | MISSING_TABLE | Check the database schema for the correct table name |
+| `no such column: X` | INVALID_COLUMN | Check the table schema for correct column names |
+| `ambiguous column name: X` | INVALID_COLUMN | Use table aliases to disambiguate |
+| `near "X": syntax error` | SYNTAX_ERROR | Review query structure, keywords, and punctuation |
+| `no tables specified` | SYNTAX_ERROR | Add FROM clause |
+| `attempt to write a readonly database` | CONSTRAINT_ERROR | Database is read-only |
+
+## Complete Example
+
+```typescript sqlite-example.ts
+import { Text2Sql } from '@deepagents/text2sql';
+import { Sqlite, tables, views, info, indexes } from '@deepagents/text2sql/sqlite';
+import { InMemoryContextStore } from '@deepagents/context';
+import { openai } from '@ai-sdk/openai';
+import Database from 'better-sqlite3';
+
+// Create database
+const db = new Database('./ecommerce.db');
+
+// Create sample schema
+db.exec(`
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  
+  CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL,
+    total REAL NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+  );
+  
+  CREATE INDEX IF NOT EXISTS idx_orders_customer
+    ON orders(customer_id);
+  
+  CREATE INDEX IF NOT EXISTS idx_orders_status
+    ON orders(status);
+`);
+
+// Create adapter
+const adapter = new Sqlite({
+  execute: (sql) => {
+    console.log('Executing:', sql);
+    return db.prepare(sql).all();
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes()
+  ]
+});
+
+// Create Text2SQL instance
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter,
+  store: new InMemoryContextStore()
+});
+
+// Generate queries
+async function demo() {
+  // Simple query
+  const sql1 = await text2sql.toSql('Show all customers');
+  console.log('Query 1:', sql1);
+  console.log('Results:', adapter.execute(sql1));
+  
+  // Join query
+  const sql2 = await text2sql.toSql('Show customer names with their order count');
+  console.log('Query 2:', sql2);
+  console.log('Results:', adapter.execute(sql2));
+  
+  // Aggregation
+  const sql3 = await text2sql.toSql('What is the total revenue by customer?');
+  console.log('Query 3:', sql3);
+  console.log('Results:', adapter.execute(sql3));
+}
+
+demo().catch(console.error);
+```
+
+## In-Memory Databases
+
+Perfect for testing:
+
+```typescript
+import Database from 'better-sqlite3';
+
+const db = new Database(':memory:');
+
+// Create test schema
+db.exec(`
+  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+  INSERT INTO users (name) VALUES ('Alice'), ('Bob');
+`);
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [tables()]
+});
+
+const sql = await text2sql.toSql('Show all users');
+console.log(sql);
+// SELECT * FROM users
+```
+
+## Read-Only Databases
+
+Open database in read-only mode:
+
+```typescript
+import Database from 'better-sqlite3';
+
+const db = new Database('./database.db', {
+  readonly: true,
+  fileMustExist: true
+});
+
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [tables()]
+});
+```
+
+## Performance Tips
+
+### 1. Use Indexes
+
+SQLite benefits greatly from indexes:
+
+```sql
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_orders_created_at ON orders(created_at);
+```
+
+### 2. Enable WAL Mode
+
+Write-Ahead Logging improves concurrency:
+
+```typescript
+const db = new Database('./database.db');
+db.pragma('journal_mode = WAL');
+```
+
+### 3. Optimize Introspection
+
+Minimize grounding functions for faster startup:
+
+```typescript
+// Fast introspection
+grounding: [tables(), info()]
+
+// Slower but more comprehensive
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints(),
+  rowCount(),
+  columnStats()
+]
+```
+
+### 4. Prepare Statements
+
+Reuse prepared statements:
+
+```typescript
+const stmts = new Map();
+
+const adapter = new Sqlite({
+  execute: (sql) => {
+    let stmt = stmts.get(sql);
+    if (!stmt) {
+      stmt = db.prepare(sql);
+      stmts.set(sql, stmt);
+    }
+    return stmt.all();
+  },
+  grounding: [tables()]
+});
+```
+
+## Limitations
+
+### No Advanced Constraints
+
+SQLite has limited constraint support:
+
+- No CHECK constraints with subqueries
+- No partial indexes (before SQLite 3.8)
+- No generated columns (before SQLite 3.31)
+
+### Limited ALTER TABLE
+
+SQLite cannot:
+
+- Drop columns (before SQLite 3.35)
+- Modify column types
+- Add constraints to existing tables
+
+### No Stored Procedures
+
+SQLite does not support:
+
+- Stored procedures
+- User-defined functions (in SQL)
+- Triggers with multiple statements
+
+## Best Practices
+
+### 1. Use Transactions
+
+```typescript
+db.exec('BEGIN');
+try {
+  // Multiple operations
+  db.exec('INSERT INTO ...');
+  db.exec('UPDATE ...');
+  db.exec('COMMIT');
+} catch (error) {
+  db.exec('ROLLBACK');
+  throw error;
+}
+```
+
+### 2. Close Connections
+
+```typescript
+process.on('exit', () => db.close());
+process.on('SIGINT', () => {
+  db.close();
+  process.exit(0);
+});
+```
+
+### 3. Backup Regularly
+
+```typescript
+import { copyFileSync } from 'fs';
+
+setInterval(() => {
+  const timestamp = new Date().toISOString();
+  copyFileSync('./database.db', `./backups/database-${timestamp}.db`);
+}, 3600000);  // Hourly backups
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL Adapter" icon="elephant" href="/text2sql/adapters/postgres">
+    Setup for PostgreSQL databases
+  </Card>
+  <Card title="Teachables" icon="graduation-cap" href="/text2sql/teachables">
+    Inject domain knowledge
+  </Card>
+  <Card title="Getting Started" icon="rocket" href="/text2sql/getting-started">
+    Complete getting started guide
+  </Card>
+  <Card title="API Reference" icon="code" href="/text2sql/api/adapters">
+    Full adapter API documentation
+  </Card>
+</CardGroup>

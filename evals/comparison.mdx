@@ -1,0 +1,307 @@
+---
+title: Comparison
+description: Compare evaluation runs and detect regressions
+---
+
+# Comparison
+
+The comparison module allows you to compare two evaluation runs case-by-case to detect improvements, regressions, and performance deltas.
+
+## Basic Usage
+
+```typescript
+import { compareRuns } from '@deepagents/evals/comparison';
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+const result = compareRuns(store, baselineRunId, candidateRunId, {
+  tolerance: 0.01,
+  regressionThreshold: 0.05,
+});
+
+console.log(result.regression.regressed); // true if any scorer regressed
+```
+
+## Comparison Options
+
+```typescript
+interface CompareOptions {
+  tolerance?: number;           // Default: 0.01
+  regressionThreshold?: number; // Default: 0.05
+}
+```
+
+### `tolerance`
+
+Score differences within this threshold are considered "unchanged":
+
+```typescript
+compareRuns(store, baselineRunId, candidateRunId, {
+  tolerance: 0.01, // ±1% is considered unchanged
+});
+```
+
+**Behavior:**
+
+- `delta < -0.01` → **regressed**
+- `-0.01 <= delta <= 0.01` → **unchanged**
+- `delta > 0.01` → **improved**
+
+### `regressionThreshold`
+
+If the mean score delta for any scorer drops below this threshold (negative), the run is flagged as regressed:
+
+```typescript
+compareRuns(store, baselineRunId, candidateRunId, {
+  regressionThreshold: 0.05, // Mean delta < -5% triggers regression flag
+});
+```
+
+**Behavior:**
+
+- `meanDelta < -0.05` → **Regression detected**
+- `meanDelta >= -0.05` → No regression
+
+## Comparison Result
+
+The `compareRuns()` function returns a `ComparisonResult`:
+
+```typescript
+interface ComparisonResult {
+  caseDiffs: CaseDiff[];
+  scorerSummaries: Record<string, ScorerSummary>;
+  costDelta: CostDelta;
+  totalCasesCompared: number;
+  regression: {
+    regressed: boolean;
+    details: Record<string, { meanDelta: number; exceeds: boolean }>;
+  };
+}
+```
+
+### `caseDiffs`
+
+Case-by-case score deltas:
+
+```typescript
+interface CaseDiff {
+  index: number;
+  scorerDeltas: Record<string, {
+    baseline: number;
+    candidate: number;
+    delta: number;
+    change: 'improved' | 'regressed' | 'unchanged';
+  }>;
+}
+```
+
+**Example:**
+
+```typescript
+result.caseDiffs[0];
+// {
+//   index: 0,
+//   scorerDeltas: {
+//     exact: { baseline: 0.8, candidate: 0.9, delta: 0.1, change: 'improved' },
+//     factual: { baseline: 1.0, candidate: 0.85, delta: -0.15, change: 'regressed' },
+//   }
+// }
+```
+
+### `scorerSummaries`
+
+Aggregated statistics per scorer:
+
+```typescript
+interface ScorerSummary {
+  meanDelta: number;
+  improvedCount: number;
+  regressedCount: number;
+  unchangedCount: number;
+}
+```
+
+**Example:**
+
+```typescript
+result.scorerSummaries.exact;
+// {
+//   meanDelta: 0.05,
+//   improvedCount: 8,
+//   regressedCount: 2,
+//   unchangedCount: 10,
+// }
+```
+
+### `costDelta`
+
+Performance and token usage deltas:
+
+```typescript
+interface CostDelta {
+  latencyDeltaMs: number;
+  tokenInDelta: number;
+  tokenOutDelta: number;
+}
+```
+
+**Example:**
+
+```typescript
+result.costDelta;
+// {
+//   latencyDeltaMs: -150,  // 150ms faster
+//   tokenInDelta: 20,      // 20 more input tokens
+//   tokenOutDelta: -10,    // 10 fewer output tokens
+// }
+```
+
+### `regression`
+
+Regression detection summary:
+
+```typescript
+result.regression;
+// {
+//   regressed: true,
+//   details: {
+//     exact: { meanDelta: 0.05, exceeds: false },
+//     factual: { meanDelta: -0.08, exceeds: true }, // Triggered regression
+//   }
+// }
+```
+
+## Example: CI/CD Integration
+
+Block deployments if the candidate run regresses:
+
+```typescript
+import { compareRuns } from '@deepagents/evals/comparison';
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+const suite = store.findSuiteByName('text2sql-accuracy');
+if (!suite) throw new Error('No suite found');
+
+const runs = store.listRuns(suite.id);
+if (runs.length < 2) {
+  console.log('Not enough runs to compare');
+  process.exit(0);
+}
+
+const [candidateRun, baselineRun] = runs.slice(-2);
+
+const result = compareRuns(
+  store,
+  baselineRun.id,
+  candidateRun.id,
+  {
+    tolerance: 0.01,
+    regressionThreshold: 0.05,
+  }
+);
+
+if (result.regression.regressed) {
+  console.error('❌ Regression detected!');
+  for (const [scorer, details] of Object.entries(result.regression.details)) {
+    if (details.exceeds) {
+      console.error(`  - ${scorer}: ${details.meanDelta.toFixed(3)}`);
+    }
+  }
+  process.exit(1);
+}
+
+console.log('✅ No regressions detected');
+process.exit(0);
+```
+
+## Example: Comparing Multiple Models
+
+Compare two model variants:
+
+```typescript
+import { evaluate } from '@deepagents/evals';
+import { compareRuns } from '@deepagents/evals/comparison';
+import { RunStore } from '@deepagents/evals/store';
+
+const store = new RunStore('.evals/store.db');
+
+// Run baseline model
+const baseline = await evaluate({
+  name: 'qa-eval',
+  model: 'gpt-4o-mini',
+  dataset,
+  task,
+  scorers,
+  reporters: [],
+  store,
+});
+
+// Run candidate model
+const candidate = await evaluate({
+  name: 'qa-eval',
+  model: 'gpt-4o',
+  dataset,
+  task,
+  scorers,
+  reporters: [],
+  store,
+});
+
+// Compare runs
+const suite = store.findSuiteByName('qa-eval');
+const runs = store.listRuns(suite!.id);
+
+const result = compareRuns(
+  store,
+  runs[runs.length - 2].id, // baseline
+  runs[runs.length - 1].id, // candidate
+);
+
+console.log('Scorer Summaries:', result.scorerSummaries);
+console.log('Cost Delta:', result.costDelta);
+```
+
+## Change Classification
+
+Each case-by-case delta is classified as:
+
+### `improved`
+
+`delta > tolerance` — Candidate score is meaningfully higher than baseline.
+
+### `regressed`
+
+`delta < -tolerance` — Candidate score is meaningfully lower than baseline.
+
+### `unchanged`
+
+`|delta| <= tolerance` — Scores are effectively the same.
+
+## Handling Mismatched Datasets
+
+If the two runs have different numbers of cases, only the **intersection** (cases that exist in both) are compared:
+
+```typescript
+const result = compareRuns(store, baselineRunId, candidateRunId);
+
+console.log(result.totalCasesCompared);
+// 80 (out of 100 baseline, 90 candidate)
+```
+
+<Warning>
+If datasets are different, comparison results may be misleading. Always compare runs with the **same dataset**.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Persistence" icon="database" href="/evals/persistence">
+    Learn about the RunStore API
+  </Card>
+  <Card title="API Reference" icon="code" href="/evals/api/engine">
+    Full engine and comparison API
+  </Card>
+</CardGroup>

@@ -1,0 +1,441 @@
+---
+title: Engine API
+description: API reference for EvalEmitter and runEval()
+---
+
+# Engine API
+
+The engine module orchestrates dataset iteration, task execution, scoring, and persistence.
+
+## Import
+
+```typescript
+import { EvalEmitter, runEval } from '@deepagents/evals/engine';
+```
+
+## `runEval(config)`
+
+Lower-level function to run an evaluation with full control.
+
+### Signature
+
+```typescript
+function runEval<T>(config: EvalConfig<T>): Promise<RunSummary>;
+```
+
+### Parameters
+
+```typescript
+interface EvalConfig<T> {
+  name: string;
+  model: string;
+  dataset: AsyncIterable<T>;
+  task: TaskFn<T>;
+  scorers: Record<string, Scorer>;
+  store: RunStore;
+  emitter?: EvalEmitter;
+  suiteId?: string;
+  config?: Record<string, unknown>;
+  maxConcurrency?: number;
+  batchSize?: number;
+  timeout?: number;
+  trials?: number;
+  threshold?: number;
+}
+```
+
+#### `name`
+
+Human-readable name for the evaluation run.
+
+```typescript
+name: 'my-eval'
+```
+
+#### `model`
+
+Model identifier.
+
+```typescript
+model: 'gpt-4o'
+```
+
+#### `dataset`
+
+Dataset to evaluate.
+
+```typescript
+import { dataset } from '@deepagents/evals/dataset';
+
+dataset: dataset([{ input: 'What is 2+2?', expected: '4' }])
+```
+
+#### `task`
+
+Task function that calls your model.
+
+```typescript
+task: async (item) => {
+  const response = await callMyLLM(item.input);
+  return { output: response };
+}
+```
+
+**Type:**
+
+```typescript
+type TaskFn<T> = (input: T) => Promise<TaskResult>;
+
+interface TaskResult {
+  output: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+```
+
+#### `scorers`
+
+Named scoring functions.
+
+```typescript
+import { exactMatch } from '@deepagents/evals/scorers';
+
+scorers: { exact: exactMatch }
+```
+
+#### `store`
+
+Run store for persistence.
+
+```typescript
+import { RunStore } from '@deepagents/evals/store';
+
+store: new RunStore('.evals/store.db')
+```
+
+#### `emitter` (optional)
+
+Event emitter for lifecycle events.
+
+```typescript
+const emitter = new EvalEmitter();
+emitter.on('case:scored', (data) => console.log(data));
+
+emitter: emitter
+```
+
+If omitted, a default emitter is created (but events won't be observed).
+
+#### `suiteId` (optional)
+
+Associate with an existing suite.
+
+```typescript
+suiteId: suite.id
+```
+
+#### `config` (optional)
+
+Arbitrary configuration metadata to store with the run.
+
+```typescript
+config: { temperature: 0.7, top_p: 1.0 }
+```
+
+#### `maxConcurrency` (optional)
+
+Maximum concurrent cases.
+
+```typescript
+maxConcurrency: 10  // Default: 10
+```
+
+#### `batchSize` (optional)
+
+Process cases in batches. Waits for each batch to complete before starting the next.
+
+```typescript
+batchSize: 50  // Process 50 cases at a time
+```
+
+If omitted, all cases are processed in one batch (subject to `maxConcurrency`).
+
+#### `timeout` (optional)
+
+Per-case timeout in milliseconds.
+
+```typescript
+timeout: 30_000  // Default: 30000
+```
+
+#### `trials` (optional)
+
+Run each case multiple times and average scores.
+
+```typescript
+trials: 3
+```
+
+#### `threshold` (optional)
+
+Minimum score to count as pass.
+
+```typescript
+threshold: 0.5  // Default: 0.5
+```
+
+### Return Value
+
+Returns a `RunSummary`:
+
+```typescript
+interface RunSummary {
+  totalCases: number;
+  passCount: number;
+  failCount: number;
+  meanScores: Record<string, number>;
+  totalLatencyMs: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+}
+```
+
+## `EvalEmitter`
+
+Event emitter for evaluation lifecycle events.
+
+### Constructor
+
+```typescript
+const emitter = new EvalEmitter();
+```
+
+### Events
+
+#### `run:start`
+
+Emitted when the run begins.
+
+```typescript
+emitter.on('run:start', (data) => {
+  console.log(`Starting run ${data.runId} with ${data.totalCases} cases`);
+});
+```
+
+**Payload:**
+
+```typescript
+{
+  runId: string;
+  totalCases: number;
+  name: string;
+  model: string;
+}
+```
+
+#### `case:start`
+
+Emitted when a case starts executing.
+
+```typescript
+emitter.on('case:start', (data) => {
+  console.log(`Case #${data.index} started`);
+});
+```
+
+**Payload:**
+
+```typescript
+{
+  runId: string;
+  index: number;
+  input: unknown;
+}
+```
+
+#### `case:scored`
+
+Emitted when a case is scored (always fires, even on error).
+
+```typescript
+emitter.on('case:scored', (data) => {
+  console.log(`Case #${data.index} scored:`, data.scores);
+});
+```
+
+**Payload:**
+
+```typescript
+{
+  runId: string;
+  index: number;
+  input: unknown;
+  output: string;
+  expected: unknown;
+  scores: Record<string, ScorerResult>;
+  error?: unknown;
+  latencyMs: number;
+  tokensIn: number;
+  tokensOut: number;
+}
+```
+
+#### `case:error`
+
+Emitted when a case throws an error.
+
+```typescript
+emitter.on('case:error', (data) => {
+  console.error(`Case #${data.index} failed:`, data.error);
+});
+```
+
+**Payload:**
+
+```typescript
+{
+  runId: string;
+  index: number;
+  error: string;
+}
+```
+
+#### `run:end`
+
+Emitted when the run completes.
+
+```typescript
+emitter.on('run:end', (data) => {
+  console.log('Run completed:', data.summary);
+});
+```
+
+**Payload:**
+
+```typescript
+{
+  runId: string;
+  summary: RunSummary;
+}
+```
+
+### Event Type
+
+All events are typed:
+
+```typescript
+interface EngineEvents {
+  'run:start': { runId: string; totalCases: number; name: string; model: string };
+  'case:start': { runId: string; index: number; input: unknown };
+  'case:scored': {
+    runId: string;
+    index: number;
+    input: unknown;
+    output: string;
+    expected: unknown;
+    scores: Record<string, ScorerResult>;
+    error?: unknown;
+    latencyMs: number;
+    tokensIn: number;
+    tokensOut: number;
+  };
+  'case:error': { runId: string; index: number; error: string };
+  'run:end': { runId: string; summary: RunSummary };
+}
+```
+
+## Examples
+
+### Basic Usage
+
+```typescript
+import { runEval, EvalEmitter } from '@deepagents/evals/engine';
+import { dataset } from '@deepagents/evals/dataset';
+import { exactMatch } from '@deepagents/evals/scorers';
+import { RunStore } from '@deepagents/evals/store';
+
+const emitter = new EvalEmitter();
+emitter.on('case:scored', (data) => {
+  console.log(`Case #${data.index}: ${JSON.stringify(data.scores)}`);
+});
+
+const summary = await runEval({
+  name: 'my-eval',
+  model: 'gpt-4o',
+  dataset: dataset([{ input: 'What is 2+2?', expected: '4' }]),
+  task: async (item) => {
+    const response = await callMyLLM(item.input);
+    return { output: response };
+  },
+  scorers: { exact: exactMatch },
+  store: new RunStore(),
+  emitter,
+  maxConcurrency: 5,
+  timeout: 30_000,
+});
+
+console.log(summary);
+```
+
+### Event Listeners
+
+```typescript
+const emitter = new EvalEmitter();
+
+emitter.on('run:start', (data) => {
+  console.log(`Starting ${data.name} with ${data.totalCases} cases`);
+});
+
+emitter.on('case:scored', (data) => {
+  const passed = Object.values(data.scores).every((s) => s.score >= 0.5);
+  console.log(`Case #${data.index}: ${passed ? 'PASS' : 'FAIL'}`);
+});
+
+emitter.on('case:error', (data) => {
+  console.error(`Case #${data.index} error: ${data.error}`);
+});
+
+emitter.on('run:end', (data) => {
+  console.log(`Completed with ${data.summary.passCount}/${data.summary.totalCases} passed`);
+});
+
+await runEval({ emitter, /* ... */ });
+```
+
+### Concurrency Control
+
+```typescript
+await runEval({
+  // ...
+  maxConcurrency: 5,  // Run 5 cases in parallel
+});
+```
+
+### Batch Processing
+
+```typescript
+await runEval({
+  // ...
+  batchSize: 50,      // Process 50 cases, then wait before starting next 50
+  maxConcurrency: 10, // Within each batch, run 10 in parallel
+});
+```
+
+### Trials
+
+```typescript
+await runEval({
+  // ...
+  trials: 3,  // Run each case 3 times, average the scores
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Evaluate API" icon="code" href="/evals/api/evaluate">
+    Higher-level evaluate() function
+  </Card>
+  <Card title="Reporters" icon="newspaper" href="/evals/api/store">
+    Use reporters instead of raw events
+  </Card>
+</CardGroup>

@@ -1,0 +1,613 @@
+---
+title: Teachables
+description: Inject domain knowledge to improve SQL generation accuracy
+---
+
+# Teachables
+
+Teachables are domain-specific knowledge fragments that improve Text2SQL accuracy by teaching the AI about your business terminology, data quirks, and query patterns.
+
+## What Are Teachables?
+
+Teachables bridge the gap between generic SQL knowledge and your specific domain. They help the AI:
+
+- **Understand business terms** - Define domain-specific terminology
+- **Follow business rules** - Enforce data access policies and guardrails
+- **Learn query patterns** - Provide examples of common queries
+- **Handle edge cases** - Document data quirks and workarounds
+- **Apply style preferences** - Enforce SQL coding standards
+
+## Teachable Types
+
+Text2SQL supports 10 teachable types from `@deepagents/context`:
+
+### 1. `term` - Business Terminology
+
+Define domain-specific abbreviations and jargon.
+
+```typescript
+import { term } from '@deepagents/context';
+
+term('MRR', 'monthly recurring revenue')
+term('ARR', 'annual recurring revenue')
+term('CAC', 'customer acquisition cost')
+term('LTV', 'lifetime value')
+```
+
+**When to use**: Business metrics, acronyms, product names, status codes.
+
+### 2. `hint` - Helpful Guidance
+
+Provide context-aware hints for query generation.
+
+```typescript
+import { hint } from '@deepagents/context';
+
+hint('Always exclude test accounts with email ending in @test.com')
+hint('Use created_at for order dates, not updated_at')
+hint('The users table contains both customers and internal employees')
+```
+
+**When to use**: Data conventions, default filters, column usage guidelines.
+
+### 3. `guardrail` - Safety Rules
+
+Enforce data access policies and prevent dangerous queries.
+
+```typescript
+import { guardrail } from '@deepagents/context';
+
+guardrail({
+  rule: 'Never expose individual salaries',
+  reason: 'Confidential HR data',
+  action: 'Aggregate by department instead'
+})
+
+guardrail({
+  rule: 'Never return more than 10,000 rows without aggregation',
+  reason: 'Performance protection',
+  action: 'Use aggregation or add LIMIT clause'
+})
+```
+
+**When to use**: PII protection, performance limits, compliance requirements.
+
+### 4. `example` - Query Examples
+
+Provide question-answer pairs for common queries.
+
+```typescript
+import { example } from '@deepagents/context';
+
+example({
+  question: 'show me churned customers',
+  answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+  note: 'Status values are lowercase'
+})
+
+example({
+  question: 'monthly revenue trend',
+  answer: `
+    SELECT 
+      DATE_TRUNC('month', created_at) AS month,
+      SUM(amount) AS revenue
+    FROM orders
+    WHERE status = 'completed'
+    GROUP BY month
+    ORDER BY month DESC
+  `
+})
+```
+
+**When to use**: Common queries, complex patterns, best practices.
+
+### 5. `explain` - Concept Explanations
+
+Explain technical concepts and their implications.
+
+```typescript
+import { explain } from '@deepagents/context';
+
+explain({
+  concept: 'soft delete pattern',
+  explanation: 'Records are not physically deleted. Instead, deleted_at timestamp is set.',
+  therefore: 'Always add WHERE deleted_at IS NULL to exclude soft-deleted records'
+})
+
+explain({
+  concept: 'status lifecycle',
+  explanation: 'Orders move: pending → processing → completed OR cancelled',
+  therefore: 'Use status IN ("completed", "cancelled") for finalized orders'
+})
+```
+
+**When to use**: Data model patterns, state machines, calculation logic.
+
+### 6. `clarification` - Ambiguity Triggers
+
+Define when to ask for clarification instead of guessing.
+
+```typescript
+import { clarification } from '@deepagents/context';
+
+clarification({
+  when: 'User asks for "revenue" without specifying gross vs net',
+  ask: 'Do you mean gross revenue or net revenue (after refunds)?',
+  reason: 'Business has separate metrics for gross and net revenue'
+})
+
+clarification({
+  when: 'User asks for "active users" without timeframe',
+  ask: 'Active in the last 30 days, 90 days, or year?',
+  reason: 'Multiple definitions of "active" exist'
+})
+```
+
+**When to use**: Ambiguous terminology, multiple valid interpretations.
+
+### 7. `workflow` - Multi-Step Tasks
+
+Define procedural workflows for complex tasks.
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+workflow({
+  task: 'Cohort retention analysis',
+  steps: [
+    'Identify cohort by signup month',
+    'For each month after signup, count active users',
+    'Calculate retention rate: active / cohort_size',
+    'Group by cohort and months_since_signup'
+  ],
+  triggers: ['retention', 'cohort'],
+  notes: 'Active = logged in within that month'
+})
+```
+
+**When to use**: Complex analyses, multi-step calculations, procedural logic.
+
+### 8. `quirk` - Data Anomalies
+
+Document known data issues and workarounds.
+
+```typescript
+import { quirk } from '@deepagents/context';
+
+quirk({
+  issue: 'Legacy orders have NULL in created_at column',
+  workaround: 'Use COALESCE(created_at, migrated_at) for date filtering'
+})
+
+quirk({
+  issue: 'Email addresses before 2020 were not normalized to lowercase',
+  workaround: 'Use LOWER(email) for case-insensitive matching'
+})
+```
+
+**When to use**: Data quality issues, migration artifacts, legacy schema problems.
+
+### 9. `styleGuide` - SQL Coding Standards
+
+Enforce SQL style preferences.
+
+```typescript
+import { styleGuide } from '@deepagents/context';
+
+styleGuide({
+  prefer: 'Full table names as aliases (users AS users)',
+  never: 'Abbreviated aliases (u, oi, t1, t2)'
+})
+
+styleGuide({
+  prefer: 'Explicit column names in SELECT',
+  never: 'SELECT * in production queries',
+  always: 'Include ORDER BY for deterministic results'
+})
+```
+
+**When to use**: Team coding standards, readability preferences.
+
+### 10. `analogy` - Conceptual Relationships
+
+Explain relationships between concepts using analogies.
+
+```typescript
+import { analogy } from '@deepagents/context';
+
+analogy({
+  concepts: ['customers', 'accounts'],
+  relationship: 'One customer can have multiple accounts (personal, business)',
+  insight: 'Use customers for billing, accounts for usage tracking',
+  therefore: 'Join through customer_id when aggregating usage'
+})
+
+analogy({
+  concepts: ['orders', 'line_items'],
+  relationship: 'Orders are shopping carts, line_items are individual products',
+  pitfall: 'Counting orders counts carts, not products sold'
+})
+```
+
+**When to use**: Complex relationships, common misconceptions.
+
+## Using Teachables
+
+### Basic Usage
+
+Pass teachables via `teachingsOptions`:
+
+```typescript
+import { Text2Sql } from '@deepagents/text2sql';
+import { term, hint, guardrail } from '@deepagents/context';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter: adapter,
+  store: store,
+  teachingsOptions: {
+    fragments: [
+      term('MRR', 'monthly recurring revenue'),
+      hint('Exclude test users with email like %@test.com'),
+      guardrail({
+        rule: 'Never expose individual salaries',
+        action: 'Aggregate by department'
+      })
+    ]
+  }
+});
+```
+
+### Organizing Teachables
+
+For larger projects, organize teachables by domain:
+
+```typescript domain-knowledge.ts
+import { term, hint, guardrail, example } from '@deepagents/context';
+
+export const businessTerms = [
+  term('MRR', 'monthly recurring revenue'),
+  term('ARR', 'annual recurring revenue'),
+  term('CAC', 'customer acquisition cost')
+];
+
+export const dataRules = [
+  hint('Exclude test accounts: email LIKE "%@test.com"'),
+  hint('Active users: last_login_at > NOW() - INTERVAL 30 DAY')
+];
+
+export const securityGuardrails = [
+  guardrail({
+    rule: 'Never expose individual salaries',
+    action: 'Aggregate by department'
+  }),
+  guardrail({
+    rule: 'PII columns require explicit approval',
+    action: 'Exclude ssn, phone, address by default'
+  })
+];
+
+export const queryExamples = [
+  example({
+    question: 'churned customers',
+    answer: `SELECT * FROM customers WHERE status = 'churned'`
+  })
+];
+```
+
+Import and use:
+
+```typescript
+import { businessTerms, dataRules, securityGuardrails } from './domain-knowledge';
+
+const text2sql = new Text2Sql({
+  // ...
+  teachingsOptions: {
+    fragments: [
+      ...businessTerms,
+      ...dataRules,
+      ...securityGuardrails
+    ]
+  }
+});
+```
+
+## Auto-Generating Teachables
+
+Generate teachables automatically from your schema:
+
+```typescript
+import { toTeachings } from '@deepagents/text2sql';
+
+const schemaFragments = await text2sql.index();
+const schemaString = JSON.stringify(schemaFragments);
+
+const autoTeachables = await toTeachings({
+  schema: schemaString,
+  context: 'This is an e-commerce database for an online store'
+});
+
+console.log(autoTeachables);
+// [
+//   term('sku', 'stock keeping unit - unique product identifier'),
+//   hint('status column uses lowercase values: pending, completed, cancelled'),
+//   guardrail({ rule: 'Protect credit_card column', action: 'Never include in SELECT' })
+// ]
+```
+
+## Date Clarification Behavior
+
+Control when the system asks for date clarification:
+
+```typescript
+const text2sql = new Text2Sql({
+  // ...
+  teachingsOptions: {
+    date: 'strict'  // Ask for clarification on ambiguous dates (default)
+  }
+});
+```
+
+Options:
+- `'strict'` - Ask user to clarify date ranges (production default)
+- `false` - Assume all matching data without asking (useful for evals/benchmarks)
+
+### Example: Strict Mode
+
+```
+User: "Show me sales last month"
+AI: "Do you mean calendar month (January) or rolling 30 days?"
+```
+
+### Example: Permissive Mode
+
+```
+User: "Show me sales in August"
+AI: [Returns all August records across all years without asking]
+```
+
+## Best Practices
+
+### 1. Start Small
+
+Begin with high-impact teachables:
+
+```typescript
+const essentialTeachables = [
+  // Critical business terms
+  term('MRR', 'monthly recurring revenue'),
+  
+  // Data quality issues
+  quirk({
+    issue: 'Legacy data has NULL timestamps',
+    workaround: 'Use COALESCE(created_at, migrated_at)'
+  }),
+  
+  // Security requirements
+  guardrail({
+    rule: 'Never expose PII',
+    action: 'Exclude email, phone, ssn'
+  })
+];
+```
+
+### 2. Validate with Examples
+
+For each term or hint, add an example:
+
+```typescript
+term('churned', 'customer who cancelled subscription'),
+example({
+  question: 'How many customers churned last month?',
+  answer: `SELECT COUNT(*) FROM customers WHERE status = 'churned' AND churned_at >= DATE_TRUNC('month', NOW() - INTERVAL 1 MONTH)`
+})
+```
+
+### 3. Document Data Conventions
+
+Capture implicit knowledge:
+
+```typescript
+hint('created_at is the source of truth for order dates'),
+hint('updated_at changes on any edit, not just status changes'),
+explain({
+  concept: 'timestamp columns',
+  explanation: 'created_at = immutable creation time, updated_at = last modification',
+  therefore: 'Use created_at for time-based analysis'
+})
+```
+
+### 4. Protect Sensitive Data
+
+```typescript
+guardrail({
+  rule: 'PII columns require data governance approval',
+  reason: 'GDPR and privacy compliance',
+  action: 'Exclude ssn, credit_card, phone, address unless explicitly requested'
+}),
+guardrail({
+  rule: 'Never expose individual salaries or compensation',
+  reason: 'Confidential HR data',
+  action: 'Aggregate by department, level, or role'
+})
+```
+
+### 5. Handle Ambiguity
+
+```typescript
+clarification({
+  when: 'User asks for "revenue" without qualifier',
+  ask: 'Do you mean gross revenue or net revenue (after refunds)?',
+  reason: 'Business tracks both metrics separately'
+}),
+clarification({
+  when: 'User asks for "active" without timeframe',
+  ask: 'Active in the last 30, 60, or 90 days?',
+  reason: 'Multiple definitions of active user exist'
+})
+```
+
+### 6. Version Your Teachables
+
+Track teachables alongside schema versions:
+
+```typescript
+// teachables-v1.ts
+export const teachablesV1 = [
+  term('MRR', 'monthly recurring revenue'),
+  // ...
+];
+
+// teachables-v2.ts (schema changed)
+export const teachablesV2 = [
+  term('MRR', 'monthly recurring revenue'),
+  term('NRR', 'net revenue retention'),  // New metric
+  quirk({
+    issue: 'Legacy MRR calculation changed in 2024',
+    workaround: 'Use new_mrr column for data after 2024-01-01'
+  })
+];
+```
+
+## Teachables in Practice
+
+Here's a real-world example for a SaaS business:
+
+```typescript saas-teachables.ts
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  explain,
+  clarification,
+  quirk,
+  styleGuide
+} from '@deepagents/context';
+
+export const saasTeachables = [
+  // Business metrics
+  term('MRR', 'monthly recurring revenue'),
+  term('ARR', 'annual recurring revenue'),
+  term('CAC', 'customer acquisition cost'),
+  term('LTV', 'lifetime value'),
+  term('NRR', 'net revenue retention'),
+  
+  // Data conventions
+  hint('Exclude test accounts: email LIKE "%@test.com" OR is_test = 1'),
+  hint('Active subscription: status = "active" AND next_billing_date > NOW()'),
+  hint('Trial users: plan_name = "trial" OR trial_end_at > NOW()'),
+  
+  // Security guardrails
+  guardrail({
+    rule: 'Never expose payment details',
+    reason: 'PCI compliance',
+    action: 'Exclude credit_card, cvv, billing_address'
+  }),
+  guardrail({
+    rule: 'Aggregate revenue by cohort, not individual customers',
+    reason: 'Privacy and competitive sensitivity',
+    action: 'Use GROUP BY date_trunc or plan_name'
+  }),
+  
+  // Common queries
+  example({
+    question: 'Show me MRR trend',
+    answer: `
+      SELECT 
+        DATE_TRUNC('month', subscription_start_at) AS month,
+        SUM(mrr_cents) / 100.0 AS mrr
+      FROM subscriptions
+      WHERE status = 'active'
+      GROUP BY month
+      ORDER BY month DESC
+    `
+  }),
+  
+  example({
+    question: 'Churned customers last month',
+    answer: `
+      SELECT *
+      FROM customers
+      WHERE status = 'churned'
+        AND churned_at >= DATE_TRUNC('month', NOW() - INTERVAL 1 MONTH)
+        AND churned_at < DATE_TRUNC('month', NOW())
+      ORDER BY churned_at DESC
+    `
+  }),
+  
+  // Conceptual explanations
+  explain({
+    concept: 'subscription lifecycle',
+    explanation: 'trial → active → paused → churned OR cancelled',
+    therefore: 'Use status = "active" for current paying customers'
+  }),
+  
+  explain({
+    concept: 'revenue recognition',
+    explanation: 'MRR is recognized monthly, ARR is MRR * 12',
+    therefore: 'Sum MRR for monthly trends, multiply by 12 for annual projections'
+  }),
+  
+  // Ambiguity handling
+  clarification({
+    when: 'User asks for "revenue" without specifying MRR or ARR',
+    ask: 'Do you mean MRR (monthly) or ARR (annual)?',
+    reason: 'Business tracks both metrics'
+  }),
+  
+  clarification({
+    when: 'User asks for "customers" without qualifier',
+    ask: 'Do you mean all customers or only active subscribers?',
+    reason: 'Customer table includes trials, churned, and cancelled'
+  }),
+  
+  // Data quirks
+  quirk({
+    issue: 'Legacy subscriptions before 2023 have NULL in plan_name',
+    workaround: 'Use COALESCE(plan_name, "legacy") or filter WHERE created_at >= 2023-01-01'
+  }),
+  
+  quirk({
+    issue: 'Trial MRR was incorrectly included before March 2024',
+    workaround: 'Exclude trials in historical MRR: WHERE plan_name != "trial"'
+  }),
+  
+  // Style preferences
+  styleGuide({
+    prefer: 'Explicit column names and table aliases',
+    never: 'SELECT * or abbreviated aliases (s, c, u)'
+  })
+];
+```
+
+Usage:
+
+```typescript
+import { saasTeachables } from './saas-teachables';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  model: openai('gpt-4o'),
+  adapter: adapter,
+  store: store,
+  teachingsOptions: {
+    fragments: saasTeachables
+  }
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Conversational" icon="comments" href="/text2sql/conversational">
+    Build multi-turn conversations
+  </Card>
+  <Card title="Explainability" icon="lightbulb" href="/text2sql/explainability">
+    SQL to English explanations
+  </Card>
+  <Card title="Teachables API" icon="code" href="/text2sql/api/teachables">
+    Full teachables API reference
+  </Card>
+</CardGroup>

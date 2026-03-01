@@ -1,0 +1,147 @@
+---
+title: Introduction to Text2SQL
+description: AI-powered natural language to SQL queries with multi-database support
+---
+
+# Introduction to Text2SQL
+
+`@deepagents/text2sql` transforms natural language questions into validated, executable SQL queries. It's designed for production use with comprehensive safety guardrails, domain knowledge injection, and multi-turn conversational support.
+
+## What is Text2SQL?
+
+Text2SQL is an AI-powered system that:
+
+- **Converts natural language to SQL** - Ask questions in plain English, get executable queries
+- **Understands your database** - Automatic introspection of tables, relationships, indexes, and constraints
+- **Learns your domain** - Inject business terminology, rules, and patterns
+- **Supports conversations** - Multi-turn dialogs with context persistence
+- **Stays safe** - Read-only queries, validation, and configurable guardrails
+
+## Key Features
+
+### Natural Language to SQL
+
+Convert questions to validated, executable queries:
+
+```typescript
+const sql = await text2sql.toSql('Show me the top 10 customers by revenue');
+// SELECT * FROM customers ORDER BY total_revenue DESC LIMIT 10
+```
+
+### Multi-Database Support
+
+Supports major database systems with native adapters:
+
+- **PostgreSQL** - Full support including schemas, indexes, and constraints
+- **SQLite** - Lightweight embedded database support
+- **SQL Server** - Enterprise database with T-SQL dialect
+- **MySQL/MariaDB** - Popular open-source databases
+- **BigQuery** - Google Cloud data warehouse
+
+### Schema-Aware
+
+Automatic introspection discovers:
+
+- Tables, columns, and data types
+- Primary keys and foreign key relationships
+- Indexes for performance hints
+- Constraints (UNIQUE, CHECK, NOT NULL)
+- Column statistics (min/max, null fraction, cardinality)
+- Row counts and table sizes
+
+### Teachables
+
+Inject domain knowledge to improve accuracy:
+
+```typescript
+import { term, hint, guardrail } from '@deepagents/context';
+
+const text2sql = new Text2Sql({
+  // ... config
+  teachingsOptions: {
+    fragments: [
+      term('MRR', 'monthly recurring revenue'),
+      hint('Always exclude test accounts with email ending in @test.com'),
+      guardrail({
+        rule: 'Never expose individual salaries',
+        action: 'Aggregate by department instead'
+      })
+    ]
+  }
+});
+```
+
+Supports 10 teachable types: `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`.
+
+### Conversational
+
+Build multi-turn conversations with context:
+
+```typescript
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me orders from last month' }
+]);
+
+// Follow-up in the same conversation
+const followUp = await text2sql.chat([
+  { role: 'user', content: 'Now filter to only completed ones' }
+]);
+```
+
+### Explainable
+
+The system provides:
+
+- SQL validation before execution
+- Error explanations with recovery suggestions
+- Query result summaries in plain English
+- Reasoning transparency
+
+### Safe by Default
+
+- **Read-only queries** - Only SELECT and WITH statements allowed
+- **Validation** - Queries validated before execution
+- **Guardrails** - Configurable safety rules
+- **Error recovery** - Automatic retry with intelligent fixes
+
+## Architecture
+
+Text2SQL is built on three layers:
+
+1. **Adapters** - Database-specific implementations for introspection and execution
+2. **Context Engine** - Manages schema fragments, teachables, and conversation history
+3. **AI Agent** - Coordinates SQL generation, validation, execution, and explanation
+
+## How It Works
+
+1. **Introspection** - Adapter scans database schema (cached)
+2. **Context Building** - Combines schema + teachables + conversation history
+3. **SQL Generation** - AI agent generates query based on context
+4. **Validation** - Query validated using EXPLAIN
+5. **Execution** - Query executed and results returned
+6. **Explanation** - Results summarized in natural language
+
+## Use Cases
+
+- **Business Intelligence** - Natural language dashboards and reports
+- **Data Exploration** - Ad-hoc queries without SQL knowledge
+- **Customer Support** - Self-service data access
+- **Documentation** - Explain complex queries in plain English
+- **Training Data Generation** - Create question-SQL pairs from existing queries
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/text2sql/installation">
+    Install the package and database adapters
+  </Card>
+  <Card title="Getting Started" icon="rocket" href="/text2sql/getting-started">
+    Write your first natural language query
+  </Card>
+  <Card title="Database Adapters" icon="database" href="/text2sql/database-adapters">
+    Choose and configure your database adapter
+  </Card>
+  <Card title="Teachables" icon="graduation-cap" href="/text2sql/teachables">
+    Inject domain knowledge to improve accuracy
+  </Card>
+</CardGroup>

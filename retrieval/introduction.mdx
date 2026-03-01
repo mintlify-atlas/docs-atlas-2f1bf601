@@ -1,0 +1,143 @@
+---
+title: 'Introduction to RAG & Retrieval'
+description: 'Local-first RAG system for intelligent document search and retrieval'
+---
+
+# RAG & Retrieval
+
+The `@deepagents/retrieval` package provides a local-first RAG (Retrieval-Augmented Generation) system that ingests content from various sources, creates vector embeddings, and provides intelligent semantic search.
+
+## Overview
+
+Build AI applications that can intelligently search and retrieve information from:
+
+- GitHub repositories and releases
+- RSS feeds and blog posts
+- Local files and PDFs
+- Linear issues
+- Any custom data source
+
+## Key Features
+
+**Connector Pattern**
+
+Ingest from multiple sources using a unified interface. Each connector handles content fetching, processing, and metadata extraction.
+
+**Local Embeddings**
+
+Use FastEmbed for local embedding generation with models like BGE-Small-EN-V15. No external API calls required.
+
+**SQLite Vector Storage**
+
+Store embeddings in SQLite using sqlite-vec for efficient vector similarity search with cosine distance.
+
+**Semantic Search**
+
+Find relevant content using natural language queries. The system automatically handles embedding, chunking, and similarity ranking.
+
+**Content Change Detection**
+
+Automatic detection of content changes using SHA-256 hashing. Only re-processes documents when they've actually changed.
+
+## Quick Start
+
+```typescript
+import { ingest, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { SqliteStore } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+import Database from 'better-sqlite3';
+
+// Set up storage and embeddings
+const db = new Database(':memory:');
+const store = new SqliteStore(db, 384); // BGE-Small-EN-V15 dimensions
+const embedder = fastembed({ model: 'BGESmallENV15' });
+
+// Ingest content from GitHub
+await ingest({
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+
+// Search for relevant content
+const results = await similaritySearch('How do I get started with React?', {
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder,
+});
+
+console.log(results);
+```
+
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Connectors    │────│  Ingestion      │────│  Vector Store   │
+│                 │    │                 │    │                 │
+│ • GitHub        │    │ • Chunking      │    │ • SQLite        │
+│ • RSS Feeds     │    │ • Embedding     │    │ • Cosine Search │
+│ • Local Files   │    │ • Change Detect │    │ • Metadata      │
+│ • PDF Documents │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Core Concepts
+
+**Connectors**
+
+Connectors implement the `Connector` interface and provide:
+- A unique `sourceId` for tracking content
+- An async generator that yields documents with `id`, `content`, and `metadata`
+- Optional ingestion strategies (`never`, `contentChanged`, `expired`)
+
+**Ingestion**
+
+The ingestion process:
+1. Fetches content from the connector
+2. Splits content into chunks using text splitters
+3. Generates embeddings for each chunk
+4. Stores embeddings with metadata in SQLite
+
+**Similarity Search**
+
+Search finds relevant content by:
+1. Embedding the query text
+2. Computing cosine similarity with stored embeddings
+3. Ranking results by similarity score
+4. Returning the top N matches
+
+## Use Cases
+
+**Documentation Search**
+
+Ingest technical documentation and enable natural language search across your knowledge base.
+
+**Code Intelligence**
+
+Index your codebase and search for relevant code examples, patterns, or implementations.
+
+**Content Monitoring**
+
+Track RSS feeds, release notes, or blog posts and query for specific topics or updates.
+
+**Issue Analysis**
+
+Ingest Linear issues or GitHub issues and search for related bugs, features, or discussions.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/retrieval/installation">
+    Install and set up the retrieval package
+  </Card>
+  <Card title="Ingestion" icon="database" href="/retrieval/ingestion">
+    Learn how to ingest documents
+  </Card>
+  <Card title="Connectors" icon="plug" href="/retrieval/connectors">
+    Explore available connectors
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/retrieval/search">
+    Perform semantic similarity search
+  </Card>
+</CardGroup>

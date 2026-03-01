@@ -1,0 +1,482 @@
+---
+title: Utility Functions
+description: API reference for helper utilities
+---
+
+Utility functions that support common agent operations.
+
+## toState()
+
+Access context variables within tool executions.
+
+### Signature
+
+```typescript stream_utils.ts:183:185
+export function toState<C>(options: ToolExecutionOptions): C
+```
+
+### Parameters
+
+<ParamField path="options" type="ToolExecutionOptions" required>
+  The options object passed to tool's `execute` function.
+</ParamField>
+
+### Return Value
+
+Returns the context variables with type `C`.
+
+### Example
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+import { toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  preferences: Record<string, string>;
+}
+
+const saveTool = tool({
+  description: 'Save user preference',
+  parameters: z.object({
+    key: z.string(),
+    value: z.string(),
+  }),
+  execute: async ({ key, value }, options) => {
+    // Access context
+    const ctx = toState<AppContext>(options);
+    
+    console.log('User:', ctx.userId);
+    
+    // Mutate context (changes persist)
+    ctx.preferences[key] = value;
+    
+    return `Saved ${key}=${value}`;
+  },
+});
+```
+
+## toOutput()
+
+Extract structured output from execution results.
+
+### Signature
+
+```typescript stream_utils.ts:173:181
+export function toOutput<T extends Output.Output>(
+  result:
+    | Promise<GenerateTextResult<ToolSet, T>>
+    | StreamTextResult<ToolSet, T>,
+): Promise<T>
+```
+
+### Parameters
+
+<ParamField path="result" type="GenerateTextResult | StreamTextResult" required>
+  Result from `generate()` or `execute()`.
+</ParamField>
+
+### Return Value
+
+Returns a `Promise` that resolves to the structured output.
+
+### Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, generate, execute, toOutput } from '@deepagents/agent';
+import { z } from 'zod';
+
+const dataSchema = z.object({
+  temperature: z.number(),
+  unit: z.string(),
+});
+
+const extractor = agent({
+  name: 'extractor',
+  model: openai('gpt-4o'),
+  prompt: 'Extract temperature data.',
+  output: dataSchema,
+});
+
+// With generate()
+const result1 = await generate(extractor, 'It is 72 degrees', {});
+const output1 = result1.output; // Direct access
+
+// With execute() and toOutput()
+const result2 = await execute(extractor, 'Temperature: 20C', {});
+const output2 = await toOutput(result2);
+console.log(output2); // { temperature: 20, unit: 'C' }
+
+// Or inline
+const output3 = await toOutput(generate(extractor, '98.6F', {}));
+console.log(output3); // { temperature: 98.6, unit: 'F' }
+```
+
+## user()
+
+Create a user message for agent execution.
+
+### Signature
+
+```typescript stream_utils.ts:104:116
+export function messageToUiMessage(message: string): UIMessage
+export const user = messageToUiMessage;
+```
+
+### Parameters
+
+<ParamField path="message" type="string" required>
+  The user's message text.
+</ParamField>
+
+### Return Value
+
+Returns a `UIMessage` object with:
+- `id` - Unique message identifier
+- `role` - Set to `'user'`
+- `parts` - Array containing the text content
+
+### Example
+
+```typescript
+import { agent, execute, user } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+});
+
+// Single message
+const stream1 = await execute(assistant, user('Hello!'), {});
+
+// Multiple messages (conversation)
+const messages = [
+  user('What is TypeScript?'),
+  // ... assistant response would go here
+  user('Can you give me an example?'),
+];
+
+const stream2 = await execute(assistant, messages, {});
+
+// String shorthand (automatically converted to user message)
+const stream3 = await execute(assistant, 'Hello!', {});
+```
+
+## last()
+
+Get the last item from an async iterable.
+
+### Signature
+
+```typescript stream_utils.ts:165:168
+export async function last<T>(
+  iterable: AsyncIterable<T>,
+  position = -1
+): Promise<T>
+```
+
+### Parameters
+
+<ParamField path="iterable" type="AsyncIterable<T>" required>
+  The async iterable to consume.
+</ParamField>
+
+<ParamField path="position" type="number" default="-1">
+  Position to retrieve. `-1` for last item, `-2` for second-to-last, etc.
+</ParamField>
+
+### Return Value
+
+Returns a `Promise` resolving to the item at the specified position.
+
+### Example
+
+```typescript
+import { agent, execute, last } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+});
+
+const stream = await execute(assistant, 'Count to 5', {});
+
+// Get last event from stream
+const lastEvent = await last(stream.fullStream);
+console.log('Last event:', lastEvent);
+
+// Get second-to-last
+const secondLast = await last(stream.fullStream, -2);
+```
+
+## finished()
+
+Consume an async iterable without processing items.
+
+### Signature
+
+```typescript stream_utils.ts:169:171
+export async function finished<T>(iterable: AsyncIterable<T>): Promise<void>
+```
+
+### Parameters
+
+<ParamField path="iterable" type="AsyncIterable<T>" required>
+  The async iterable to consume.
+</ParamField>
+
+### Example
+
+```typescript
+import { agent, execute, finished } from '@deepagents/agent';
+
+const stream = await execute(assistant, 'Process this', {});
+
+// Consume stream without processing
+await finished(stream.fullStream);
+
+console.log('Stream finished');
+```
+
+## input()
+
+Prompt for user input from stdin (for CLI applications).
+
+### Signature
+
+```typescript stream_utils.ts:118:128
+export async function input(defaultValue?: string): Promise<string>
+```
+
+### Parameters
+
+<ParamField path="defaultValue" type="string">
+  Default value if user presses Enter without typing.
+</ParamField>
+
+### Return Value
+
+Returns a `Promise<string>` with the user's input.
+
+### Example
+
+```typescript
+import { input } from '@deepagents/agent';
+
+const userMessage = await input('Type your question');
+console.log('You asked:', userMessage);
+
+// With default value
+const name = await input('John');
+console.log('Name:', name);
+```
+
+## confirm()
+
+Prompt for yes/no confirmation from stdin.
+
+### Signature
+
+```typescript stream_utils.ts:130:163
+export async function confirm(
+  message: string,
+  defaultValue = true,
+): Promise<boolean>
+```
+
+### Parameters
+
+<ParamField path="message" type="string" required>
+  The confirmation question.
+</ParamField>
+
+<ParamField path="defaultValue" type="boolean" default="true">
+  Default value if user presses Enter.
+</ParamField>
+
+### Return Value
+
+Returns a `Promise<boolean>`.
+
+### Example
+
+```typescript
+import { confirm } from '@deepagents/agent';
+
+const shouldContinue = await confirm('Continue?');
+if (shouldContinue) {
+  console.log('Continuing...');
+} else {
+  console.log('Cancelled');
+}
+
+// With default as false
+const shouldDelete = await confirm('Delete all files?', false);
+if (shouldDelete) {
+  console.log('Deleting...');
+}
+```
+
+## printer
+
+Utilities for printing streams to stdout.
+
+### printer.stdout()
+
+Print a stream to stdout with formatting.
+
+```typescript stream_utils.ts:83:98
+await printer.stdout(stream, {
+  reasoning: true,  // Include reasoning
+  text: true,       // Include text
+  wrapInTags: true, // Wrap in XML-style tags
+});
+```
+
+### printer.readableStream()
+
+Print a ReadableStream.
+
+```typescript stream_utils.ts:66:82
+await printer.readableStream(readableStream, {
+  reasoning: true,
+  text: true,
+  wrapInTags: true,
+});
+```
+
+### Example
+
+```typescript
+import { agent, execute, printer } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const assistant = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are helpful.',
+});
+
+const stream = await execute(assistant, 'Tell me a story', {});
+
+// Print with formatting
+await printer.stdout(stream, {
+  reasoning: false,  // Don't show reasoning
+  text: true,        // Show text
+  wrapInTags: false, // No XML tags
+});
+
+// Usage is also available
+const usage = await stream.totalUsage;
+console.log('\nTokens used:', usage.totalTokens);
+```
+
+## Complete Example
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { 
+  agent, 
+  execute, 
+  generate,
+  toState, 
+  toOutput, 
+  user,
+  input,
+  confirm,
+  printer 
+} from '@deepagents/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+// Context interface
+interface AppContext {
+  userId: string;
+  savedData: string[];
+}
+
+// Tool using toState()
+const saveTool = tool({
+  description: 'Save data',
+  parameters: z.object({
+    data: z.string(),
+  }),
+  execute: async ({ data }, options) => {
+    const ctx = toState<AppContext>(options);
+    ctx.savedData.push(data);
+    return `Saved: ${data}`;
+  },
+});
+
+// Agent with structured output
+const analyzer = agent({
+  name: 'analyzer',
+  model: openai('gpt-4o'),
+  prompt: 'Analyze and save data.',
+  tools: { save: saveTool },
+  output: z.object({
+    analysis: z.string(),
+    itemCount: z.number(),
+  }),
+});
+
+// Interactive CLI workflow
+async function main() {
+  // Get user input
+  const userInput = await input('Enter data to analyze');
+  
+  // Confirm action
+  const proceed = await confirm('Proceed with analysis?');
+  if (!proceed) {
+    console.log('Cancelled');
+    return;
+  }
+  
+  // Prepare context
+  const context: AppContext = {
+    userId: 'user123',
+    savedData: [],
+  };
+  
+  // Execute with streaming
+  const stream = await execute(analyzer, user(userInput), context);
+  
+  // Print to stdout
+  await printer.stdout(stream);
+  
+  // Get structured output
+  const output = await toOutput(stream);
+  console.log('\nAnalysis:', output.analysis);
+  console.log('Item count:', output.itemCount);
+  console.log('Saved data:', context.savedData);
+  
+  // Check usage
+  const usage = await stream.totalUsage;
+  console.log('\nTokens used:', usage.totalTokens);
+}
+
+main();
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="agent()" icon="robot" href="/agent/api/agent">
+    Create agents
+  </Card>
+  <Card title="Execution Functions" icon="play" href="/agent/api/execution">
+    execute(), generate(), swarm()
+  </Card>
+  <Card title="Context Variables" icon="share-nodes" href="/agent/context-variables">
+    Working with context
+  </Card>
+  <Card title="Streaming" icon="water" href="/agent/streaming">
+    Streaming guide
+  </Card>
+</CardGroup>

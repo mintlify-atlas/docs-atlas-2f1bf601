@@ -1,0 +1,396 @@
+---
+title: Tools
+description: Integrate tools with agents to extend their capabilities
+---
+
+Tools extend agent capabilities by allowing them to interact with external systems, perform computations, or access data. The agent framework is fully compatible with [Vercel AI SDK tools](https://sdk.vercel.ai/docs/foundations/tools).
+
+## Basic Tool Integration
+
+Add tools to an agent using the `tools` configuration:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const weatherTool = tool({
+  description: 'Get weather for a location',
+  parameters: z.object({
+    location: z.string(),
+  }),
+  execute: async ({ location }) => {
+    // Simulate weather API call
+    return { temperature: 72, condition: 'sunny', location };
+  },
+});
+
+const weatherAgent = agent({
+  name: 'weather_agent',
+  model: openai('gpt-4o'),
+  prompt: 'You help users check the weather.',
+  tools: { weather: weatherTool },
+});
+
+const stream = await execute(weatherAgent, 'What is the weather in Tokyo?', {});
+console.log(await stream.text);
+```
+
+## Tool Parameters
+
+Define tool parameters using Zod schemas:
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const searchTool = tool({
+  description: 'Search for information on the web',
+  parameters: z.object({
+    query: z.string().describe('The search query'),
+    limit: z.number().optional().describe('Maximum results to return'),
+    includeImages: z.boolean().default(false),
+  }),
+  execute: async ({ query, limit = 10, includeImages }) => {
+    // Perform search
+    return {
+      results: [/* search results */],
+      count: 10,
+    };
+  },
+});
+```
+
+## Accessing Context in Tools
+
+Tools can access context variables using `toState()`:
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+import { toState } from '@deepagents/agent';
+
+interface AppContext {
+  userId: string;
+  apiKey: string;
+  preferences: Record<string, string>;
+}
+
+const savePreferenceTool = tool({
+  description: 'Save user preference',
+  parameters: z.object({
+    key: z.string(),
+    value: z.string(),
+  }),
+  execute: async ({ key, value }, options) => {
+    const ctx = toState<AppContext>(options);
+    
+    // Access context
+    console.log('User ID:', ctx.userId);
+    
+    // Mutate context
+    ctx.preferences[key] = value;
+    
+    return `Saved ${key}=${value} for user ${ctx.userId}`;
+  },
+});
+
+const agent = agent<unknown, AppContext>({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'Help the user manage their preferences.',
+  tools: { savePreference: savePreferenceTool },
+});
+
+const context: AppContext = {
+  userId: 'user123',
+  apiKey: 'secret',
+  preferences: {},
+};
+
+const stream = await execute(agent, 'Set my theme to dark', context);
+await stream.text;
+
+console.log(context.preferences); // { theme: 'dark' }
+```
+
+## Multiple Tools
+
+Agents can have multiple tools:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const tools = {
+  getCurrentTime: tool({
+    description: 'Get the current time',
+    parameters: z.object({}),
+    execute: async () => {
+      return new Date().toISOString();
+    },
+  }),
+  
+  calculateAge: tool({
+    description: 'Calculate age from birth year',
+    parameters: z.object({
+      birthYear: z.number(),
+    }),
+    execute: async ({ birthYear }) => {
+      const currentYear = new Date().getFullYear();
+      return currentYear - birthYear;
+    },
+  }),
+  
+  convertCurrency: tool({
+    description: 'Convert between currencies',
+    parameters: z.object({
+      amount: z.number(),
+      from: z.string(),
+      to: z.string(),
+    }),
+    execute: async ({ amount, from, to }) => {
+      // Simulate currency conversion
+      return amount * 1.1; // Mock exchange rate
+    },
+  }),
+};
+
+const utilityAgent = agent({
+  name: 'utility_agent',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful utility assistant with various tools.',
+  tools,
+});
+```
+
+## Tool Choice
+
+Control when tools are used:
+
+```typescript
+const agent = agent({
+  name: 'assistant',
+  model: openai('gpt-4o'),
+  prompt: 'You are a helpful assistant.',
+  tools: { /* ... */ },
+  toolChoice: 'required', // 'auto' | 'none' | 'required'
+});
+```
+
+<ParamField path="toolChoice" type="string" default="auto">
+  - `'auto'` - Model decides when to use tools
+  - `'none'` - Never use tools
+  - `'required'` - Always use at least one tool
+</ParamField>
+
+## Tool Execution Examples
+
+### File System Operations
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+import { readFile, writeFile } from 'fs/promises';
+
+const fileTools = {
+  readFile: tool({
+    description: 'Read contents of a file',
+    parameters: z.object({
+      path: z.string(),
+    }),
+    execute: async ({ path }) => {
+      const content = await readFile(path, 'utf-8');
+      return content;
+    },
+  }),
+  
+  writeFile: tool({
+    description: 'Write content to a file',
+    parameters: z.object({
+      path: z.string(),
+      content: z.string(),
+    }),
+    execute: async ({ path, content }) => {
+      await writeFile(path, content);
+      return `Wrote ${content.length} bytes to ${path}`;
+    },
+  }),
+};
+```
+
+### API Calls
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const githubTools = {
+  getRepository: tool({
+    description: 'Get information about a GitHub repository',
+    parameters: z.object({
+      owner: z.string(),
+      repo: z.string(),
+    }),
+    execute: async ({ owner, repo }) => {
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}`
+      );
+      return await response.json();
+    },
+  }),
+  
+  searchRepositories: tool({
+    description: 'Search GitHub repositories',
+    parameters: z.object({
+      query: z.string(),
+      limit: z.number().default(10),
+    }),
+    execute: async ({ query, limit }) => {
+      const response = await fetch(
+        `https://api.github.com/search/repositories?q=${query}&per_page=${limit}`
+      );
+      const data = await response.json();
+      return data.items;
+    },
+  }),
+};
+```
+
+### Database Operations
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const dbTools = {
+  queryUsers: tool({
+    description: 'Query users from database',
+    parameters: z.object({
+      email: z.string().optional(),
+      limit: z.number().default(10),
+    }),
+    execute: async ({ email, limit }) => {
+      // Simulate database query
+      return [
+        { id: 1, email: 'user@example.com', name: 'John' },
+        // ...
+      ];
+    },
+  }),
+  
+  createUser: tool({
+    description: 'Create a new user',
+    parameters: z.object({
+      email: z.string(),
+      name: z.string(),
+    }),
+    execute: async ({ email, name }) => {
+      // Simulate user creation
+      return { id: 123, email, name, createdAt: new Date() };
+    },
+  }),
+};
+```
+
+## Real-World Example: Research Agent
+
+From the source code examples:
+
+```typescript research_bot.ts:56:76
+import { openai } from '@ai-sdk/openai';
+import { agent, execute } from '@deepagents/agent';
+
+const research = agent({
+  name: 'ResearchAgent',
+  model: openai('gpt-4o'),
+  prompt: `
+    You are a research assistant. Given a search term, you search the web 
+    for that term and produce a concise summary of the results.
+  `,
+  tools: {
+    web_search: openai.tools.webSearch({
+      searchContextSize: 'low',
+    }),
+  },
+});
+
+const stream = await execute(
+  research,
+  'Search term: artificial intelligence\nReason for searching: understanding AI trends',
+  {}
+);
+
+const summary = await stream.text;
+console.log(summary);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clear Tool Descriptions">
+    Write descriptive tool descriptions so the agent knows when to use each tool:
+    
+    ```typescript
+    tool({
+      description: 'Get current weather conditions for a specific location. Returns temperature, humidity, and forecast.',
+      // ...
+    })
+    ```
+  </Accordion>
+  
+  <Accordion title="Parameter Descriptions">
+    Add descriptions to Zod schema fields:
+    
+    ```typescript
+    z.object({
+      location: z.string().describe('City name or coordinates (lat,lng)'),
+      units: z.enum(['celsius', 'fahrenheit']).default('celsius'),
+    })
+    ```
+  </Accordion>
+  
+  <Accordion title="Error Handling">
+    Handle errors gracefully in tool execution:
+    
+    ```typescript
+    execute: async ({ query }) => {
+      try {
+        const result = await apiCall(query);
+        return result;
+      } catch (error) {
+        return { error: 'Failed to fetch data', message: error.message };
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Tool Response Format">
+    Return structured data that's easy for the agent to interpret:
+    
+    ```typescript
+    return {
+      success: true,
+      data: { /* ... */ },
+      message: 'Operation completed successfully',
+    };
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Multi-Agent Systems" icon="users" href="/agent/multi-agent">
+    Coordinate agents with handoffs
+  </Card>
+  <Card title="Context Variables" icon="share-nodes" href="/agent/context-variables">
+    Share state between agents and tools
+  </Card>
+  <Card title="Structured Output" icon="code" href="/agent/structured-output">
+    Get type-safe responses
+  </Card>
+</CardGroup>
