@@ -1,0 +1,241 @@
+{
+  "projectType": "framework",
+  "projectName": "DeepAgents",
+  "projectDescription": "A TypeScript framework for building multi-agent AI systems with tools, handoffs, RAG, and natural language SQL capabilities.",
+  "theme": "aspen",
+  "primaryColor": "#ff4d00",
+  "lightColor": "#00d9ff",
+  "darkColor": "#333333",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/agents",
+              "concepts/tools",
+              "concepts/handoffs",
+              "concepts/context",
+              "concepts/streaming"
+            ]
+          },
+          {
+            "group": "Packages",
+            "pages": [
+              "packages/agent",
+              "packages/context",
+              "packages/text2sql",
+              "packages/retrieval",
+              "packages/evals",
+              "packages/orchestrator",
+              "packages/toolbox"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Agent Framework",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "agent/introduction",
+              "agent/installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "agent/basic-agent",
+              "agent/tools",
+              "agent/multi-agent",
+              "agent/structured-output",
+              "agent/context-variables",
+              "agent/streaming"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "agent/api/agent",
+              "agent/api/instructions",
+              "agent/api/execution",
+              "agent/api/utilities"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Context Management",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "context/introduction",
+              "context/installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "context/fragments",
+              "context/renderers",
+              "context/domain-knowledge",
+              "context/user-context",
+              "context/messages",
+              "context/stream-persistence"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "context/api/fragment-builders",
+              "context/api/renderers",
+              "context/api/stream-store"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Text2SQL",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "text2sql/introduction",
+              "text2sql/installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "text2sql/getting-started",
+              "text2sql/database-adapters",
+              "text2sql/teachables",
+              "text2sql/conversational",
+              "text2sql/explainability"
+            ]
+          },
+          {
+            "group": "Database Adapters",
+            "pages": [
+              "text2sql/adapters/sqlite",
+              "text2sql/adapters/postgres",
+              "text2sql/adapters/sqlserver",
+              "text2sql/adapters/mysql",
+              "text2sql/adapters/bigquery"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "text2sql/api/core",
+              "text2sql/api/teachables",
+              "text2sql/api/adapters"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "RAG & Retrieval",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "retrieval/introduction",
+              "retrieval/installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "retrieval/ingestion",
+              "retrieval/connectors",
+              "retrieval/embeddings",
+              "retrieval/search"
+            ]
+          },
+          {
+            "group": "Connectors",
+            "pages": [
+              "retrieval/connectors/github",
+              "retrieval/connectors/rss",
+              "retrieval/connectors/files",
+              "retrieval/connectors/pdf",
+              "retrieval/connectors/linear"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "retrieval/api/core",
+              "retrieval/api/connectors",
+              "retrieval/api/stores"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Evals",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "evals/introduction",
+              "evals/installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "evals/quickstart",
+              "evals/datasets",
+              "evals/scorers",
+              "evals/comparison",
+              "evals/persistence"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "evals/api/evaluate",
+              "evals/api/dataset",
+              "evals/api/scorers",
+              "evals/api/engine",
+              "evals/api/store"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-agent coordination with automatic handoffs",
+    "Vercel AI SDK tool integration",
+    "Type-safe structured output with Zod",
+    "Natural language to SQL with multi-database support",
+    "Local-first RAG with vector embeddings",
+    "Context management with multiple rendering formats",
+    "LLM evaluation framework with dataset transforms and scoring",
+    "Stream persistence for durable AI workflows"
+  ],
+  "publicApiSurface": [
+    "@deepagents/agent: agent, execute, generate, swarm, instructions, toState, toOutput, user",
+    "@deepagents/context: XmlRenderer, MarkdownRenderer, TomlRenderer, ToonRenderer, term, hint, guardrail, example, workflow, user, assistant, reminder, SqliteStreamStore, StreamManager",
+    "@deepagents/text2sql: SQL adapters (Sqlite, Postgres, SqlServer, MySQL, BigQuery), teachables API, conversational interface",
+    "@deepagents/retrieval: ingest, similaritySearch, FastEmbed, SqliteStore, connectors (GitHub, RSS, Files, PDF, Linear)",
+    "@deepagents/evals: evaluate, dataset, exactMatch, includes, regex, levenshtein, jsonMatch, factuality, RunStore, EvalEmitter, compareRuns, consoleReporter",
+    "@deepagents/orchestrator: High-level agent orchestration utilities",
+    "@deepagents/toolbox: Pre-built tools for agents"
+  ]
+}
